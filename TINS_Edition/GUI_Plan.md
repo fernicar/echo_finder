@@ -1,0 +1,13 @@
+- [ ] Understand TINS requirements from `TINS_Edition\scuffedepoch-tins.md`
+- [ ] Analyze each `*.py` to understand its functionality and UI elements.
+- [ ] Design the PySide6 GUI structure based on TINS principles and each `*.py` features.
+- [ ] Create `TINS_Edition\README.md` detailing the TINS-based redesign.
+- [ ] Refactor `TINS_Edition\README.md` to incorporate PySide6 GUI specifics after studying `TINS_Edition\PySide6modern.md` and `TINS_Edition\best_gui.py`.
+- [ ] Implement the Model component (`model.py`) for data handling and business logic.
+- [ ] Implement the View/Controller component (`main.py`) using PySide6.
+- [ ] Create `requirements.txt` with PySide6 dependency.
+- [ ] Add a `__main__` test block to `model.py`.
+- [ ] Update `TINS_Edition\README.md` with installation and usage instructions.
+- [ ] Test `model.py` and fix any bugs.
+- [ ] Test `main.py` (GUI interaction) and fix any bugs.
+- [ ] Final review of the GUI and functionality.
