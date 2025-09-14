@@ -1,197 +1,153 @@
-# echo_finder_TINS_Edition
+# TINS Echo Finder
 
 ## Description
-`echo_finder_TINS_Edition` is a sophisticated desktop application designed to identify and highlight redundant or excessively repeated phrases ("echoes") within narrative text. It helps users refine their writing by pinpointing repetitive phrasing, focusing on the "longest possible repeating sequences" to provide actionable insights. The application features a live, interactive highlighting system that updates in real-time as the user edits, providing an intuitive and powerful curation experience. It also includes persistent user preferences for UI theme, appearance, and sorting, ensuring a personalized workflow.
+
+A powerful desktop utility built with Python and PySide6, designed for writers, editors, and developers to analyze text and identify repeated phrases, commonly known as "echoes." The application helps users improve the quality of their prose by highlighting repetitive language. Users can paste text, define the phrase length to search for, and receive a comprehensive, sortable list of all echoed phrases. The entire project, including text, settings, and results, can be saved and loaded for later review.
 
 ## Functionality
 
 ### Core Features
--   **Text Input:** Load text from a project file or paste/type directly into a dedicated text area.
--   **Echo Detection:** Process the narrative text to find repeating sequences of words (phrases).
--   **Configurable Word Count:** Analyze phrases with a user-configurable minimum and maximum number of words. The maximum is dynamically limited by the longest available phrase in the text.
--   **"Maximal Match" (Greedy) Logic:** Prioritize and report only the longest possible repeating phrases, automatically filtering out shorter, overlapping repetitions that are fully contained within a reported longer echo.
--   **Live Interactive Highlighting:** Select a phrase from the results list or type into a dedicated toolbar field to see all occurrences instantly highlighted. The highlights and result counts update in real-time as the main text is edited.
--   **Persistent UI Customization:** Choose between Light, Dark, or Auto (system) themes, and select from available UI styles (e.g., Fusion, Windows). Preferences are saved and automatically applied on next launch.
--   **Persistent Sorting Presets:** Offer two predefined sorting methods: "Longest First (by Word Count)" and "Most Repeated (Short to Long)". The application defaults to "Longest First" and remembers the user's last choice across sessions.
--   **Custom Whitelist:** Define a project-specific whitelist of abbreviations (e.g., "Dr.", "Mr.") whose internal punctuation should be preserved during text preprocessing.
--   **Seamless Clipboard Integration:** An "Auto Copy" feature, enabled by default, instantly copies any selected phrase from the results list to the system clipboard for use in external editors.
--   **Project Management:** Create, load, and save projects as `.json` files, preserving the text, configurations, whitelist, and analysis results.
--   **Robust UI Feedback:** Provide clear visual indicators for a "dirty" state (when inputs no longer match the last analysis) and detailed status messages.
 
-### User Interface (PySide6)
+-   **Text Analysis:** Paste or open large blocks of text for analysis in the main editor.
+-   **Configurable Phrase Search:** Define the minimum and maximum number of words a phrase must contain to be considered an echo using dedicated spinbox controls.
+-   **Responsive Echo Detection:** A background process scans the text to find all phrases that repeat two or more times, ensuring the UI remains responsive and does not freeze during analysis.
+-   **Maximal Match Filtering:** The core algorithm intelligently filters out sub-phrases. For example, if "the quick brown fox" is an echo, the tool will not separately report "the quick brown" or "quick brown fox".
+-   **Results Display:** View all found echoes in a clear, sortable table showing the repetition count, word count, and the phrase itself.
+-   **Live Highlighting:** Select an echo from the results list or type a phrase to see all its occurrences instantly highlighted in the main text editor.
+-   **Whitelist Management:** Maintain a custom list of words or abbreviations (e.g., "Mr.", "Dr.", "i.e.") to be treated as single, case-sensitive units during analysis, preventing them from being broken up or lowercased.
+-   **Project Persistence:** Save and load entire analysis sessions as human-readable `.json` files. This includes the original text, all settings, the whitelist, and the discovered echoes.
+-   **UI Customization:** Switch between Light, Dark, and System default themes. Apply various native UI styles (e.g., Fusion, Windows, etc.) for a personalized look and feel.
+-   **Dirty State Indicator:** A red border appears around the text input area when the text or analysis parameters have changed, visually indicating that the current results are stale and a new analysis should be run.
+-   **Clipboard Integration:** Automatically copy a phrase to the system clipboard when it is selected from the results table (this feature can be toggled).
 
-The main application window is a PySide6 desktop application that respects persistent user settings for style and theme. It features a central layout divided into four main sections by `QSplitter` widgets, allowing dynamic resizing.
+### User Interface
 
-```mermaid
-graph TD
-    A[Main Window (echo_finder_TINS_Edition)] --> B[Menu Bar]
-    A --> C["Splitter 1 (Vertical)"]
-    C --> D["Narrative Text Area (QTextEdit)"]
-    C --> E["Splitter 2 (Vertical)"]
-    E --> F["Echo Results List (QTableWidget)"]
-    E --> G["Splitter 3 (Vertical)"]
-    G --> H["Whitelist Area (QListWidget)"]
-    G --> I["Status Bar (QStatusBar)"]
-    A --> J["Toolbar (QToolBar)"]
+The application's main window is organized into a clean, three-part vertical layout using a splitter, with a comprehensive toolbar for primary actions and a standard menu bar.
+
 ```
-
-#### Menu Bar
--   **File:**
-    -   `New (Ctrl+N)`: Initializes a new empty project.
-    -   `Open (Ctrl+O)`: Opens a `QFileDialog` to select a `.json` project file.
-    -   `Save (Ctrl+S)`: Saves current project state.
-    -   `Save As (Ctrl+Shift+S)`: Opens `QFileDialog` to save project to a new `.json` file.
-    -   `Exit (Ctrl+Q)`: Closes the application.
--   **Edit:**
-    -   `Paste from Clipboard (Ctrl+V)`: Pastes system clipboard content into `Narrative Text Area`.
-    -   `Auto Copy Phrase to Clipboard`: A checkable action, enabled by default.
-    -   `Appearance`: A sub-menu with a checkable, exclusive group of actions for all available system styles (e.g., Fusion, Windows).
-    -   `Theme`: A sub-menu with a checkable, exclusive group of actions for `Auto`, `Light`, and `Dark` themes.
--   **Help:**
-    -   `About`: Displays a `QMessageBox` with application details, license, and repository link.
-
-#### Narrative Text Area (`QTextEdit`)
--   A large, multi-line `QTextEdit` widget for displaying and editing the narrative text.
--   **Dirty Indicator:** Displays a red border when the current inputs (text, word counts, whitelist) do not match the state of the last successful analysis.
--   **Live Highlighting:** Dynamically highlights all occurrences of a selected phrase, using a theme-aware color (`QPalette.Highlight`).
-
-#### Echo Results List (`QTableWidget`)
--   Displays processed echo phrases.
--   Columns: `Count` (integer), `Words` (integer), `Phrase` (string).
--   The `Count` column updates live as the user edits the main text while a phrase is highlighted.
-
-#### Whitelist Area (`QListWidget` with Controls)
--   `QListWidget` displaying the current project's custom abbreviations.
--   Accompanying buttons for `Add` and `Remove` whitelist entries.
-
-#### Status Bar (`QStatusBar`)
--   Displays real-time messages: "Ready", "Processing...", "Project saved", "Copied to clipboard", etc.
-
-#### Toolbar (`QToolBar`)
--   **Controls:**
-    -   `Min Words:` (`QSpinBox`, configurable).
-    -   `Max Words:` (`QSpinBox`, configurable, with its maximum value dynamically set).
-    -   `Find Them / Find Again` (`QPushButton`).
-    -   `Preset:` (`QComboBox` with "Longest First" and "Most Repeated" options).
-    -   `Highlight:` (`QLineEdit`): An editable field that receives the selected phrase or accepts manual input for ad-hoc live searching.
++---------------------------------------------------------------------------------------------------+
+| [File] [Edit] [Help]                                                                              |
++---------------------------------------------------------------------------------------------------+
+| Min Words: [2] Max Words: [8] [ Find Them / Find Again ] Preset: [Longest First ▼] Highlight: [ ] |
++---------------------------------------------------------------------------------------------------+
+|                                                                                                   |
+|   +-------------------------------------------------------------------------------------------+   |
+|   |                                                                                           |   |
+|   | Narrative Text Editor (Paste your source text here...)                                    |   |
+|   |                                                                                           |   |
+|   +-------------------------------------------------------------------------------------------+   |
+|                                                                                                   |
+|   +-------------------------------------------------------------------------------------------+   |
+|   | | Count ▼ | Words   | Phrase                                                              |   |
+|   | |---------|---------|---------------------------------------------------------------------|   |
+|   | | 3       | 5       | the quick brown fox jumps                                           |   |
+|   | | 2       | 4       | over the lazy dog                                                   |   |
+|   +-------------------------------------------------------------------------------------------+   |
+|                                                                                                   |
+|   +-------------------------------------------------------------------------------------------+   |
+|   | [ Add ] [ Remove ]                                                                        |   |
+|   | +---------------------------------------------------------------------------------------+ |   |
+|   | | Whitelist:                                                                            | |   |
+|   | | - Dr.                                                                                 | |   |
+|   | | - Mr.                                                                                 | |   |
+|   | | - i.e.                                                                                | |   |
+|   | +---------------------------------------------------------------------------------------+ |   |
+|   +-------------------------------------------------------------------------------------------+   |
++---------------------------------------------------------------------------------------------------+
+| Status: Processing complete. Found 2 maximal echoes.                                              |
++---------------------------------------------------------------------------------------------------+
+```
 
 ### Behavior Specifications
 
--   **Processing Trigger:** The `Find Them / Find Again` button explicitly calls `model.py`'s `process_text()` method.
--   **Dirty State Logic (State Snapshotting):** After a successful analysis, a snapshot of the inputs (text, word counts, whitelist) is taken. The state is considered "dirty" if the current inputs no longer match this snapshot. This comparison is checked whenever a relevant input changes.
--   **Live Highlighting Behavior:** User interaction (clicking the results table or typing in the highlight field) triggers a 250ms debounce `QTimer`. When the timer finishes, a live search is performed on the main text, applying theme-aware highlights and updating the result counts. Editing the main text also re-triggers this process.
--   **Persistent Settings (`QSettings`):** The application uses `QSettings` to store and load the user's preferred GUI style, theme, and default sort preset. These are applied at startup. The sort preset is saved the moment it's changed.
--   **Project Loading:** Loading a project restores its specific state. A new project inherits the user's persistent global preferences.
--   **Model-to-UI Updates:** `model.py` uses PySide6 signals (e.g., `echo_results_updated`, `project_loaded`) to communicate with `main.py`, which updates the UI via connected slots.
+-   **Analysis Workflow:**
+    1.  The user pastes text into the top `QTextEdit` panel.
+    2.  The user adjusts the `Min Words` and `Max Words` `QSpinBox` controls in the toolbar. The spinboxes are linked, preventing the minimum from exceeding the maximum.
+    3.  The user clicks the `"Find Them / Find Again"` button. The button is disabled if the text contains fewer words than the specified minimum.
+    4.  The analysis runs in a background thread. The status bar at the bottom provides feedback on the process.
+    5.  Upon completion, the middle `QTableWidget` populates with the results.
+-   **Result Interaction:**
+    1.  Clicking any cell in a row in the results table populates the `"Highlight"` `QLineEdit` in the toolbar with that row's phrase.
+    2.  If the `"Auto Copy Phrase to Clipboard"` option in the `Edit` menu is checked, the phrase is also copied to the system clipboard, and a confirmation appears in the status bar.
+-   **Sorting:** The results table can be sorted using the `"Preset"` `QComboBox` with two options:
+    1.  `longest_first_by_word_count`: Sorts results primarily by word count (descending), secondarily by repetition count (descending), and finally alphabetically by phrase.
+    2.  `most_repeated_short_to_long`: Sorts results primarily by repetition count (descending), secondarily by word count (ascending), and finally alphabetically by phrase.
+-   **Live Highlighting Dynamics:**
+    1.  When text is entered into the `"Highlight"` field, a debounced timer (250ms) triggers the highlighting function to ensure performance.
+    2.  All exact, case-insensitive matches for the text are highlighted in the main narrative editor.
+    3.  Simultaneously, the `"Count"` column for the corresponding phrase in the results table is updated in real-time to reflect the number of highlighted instances. If the count drops below 2, the number is grayed out.
+-   **Saving and Loading:** Standard `File` menu options (`New`, `Open`, `Save`, `Save As`) allow users to manage projects. Saving captures the entire application state into a `.json` file.
+-   **Whitelist Management:** The bottom panel contains a `QListWidget` for the whitelist. The `Add` button opens a dialog to enter a new term, and the `Remove` button deletes the selected term(s).
 
 ## Technical Implementation
 
 ### Architecture
--   **`model.py`**: A `QObject` encapsulating all application logic: data handling, text processing, echo detection, project management, and sorting.
--   **`main.py`**: The `QMainWindow` that manages the GUI, user interactions, and persistent settings via `QSettings`. It acts as the view/controller.
--   **Threading**: Long-running operations in `model.py` (specifically `process_text()`) must run in a separate `QThread` to keep the GUI responsive.
 
-### Data Model
+The application follows a Model-View architecture, leveraging Qt's signals and slots mechanism for communication. This separation ensures the UI remains responsive while data processing occurs in the background.
 
-#### Project Structure (JSON file, e.g., `my_project.json`)
-```json
-{
-  "project_name": "My Narrative Analysis",
-  "original_text": "The turtle started running and then it smiled...",
-  "min_phrase_words": 2,
-  "max_phrase_words": 8,
-  "custom_whitelist": ["Dr.", "Mr.", "Mrs.", "St.", "e.g.", "i.e."],
-  "last_used_sort_preset": "longest_first_by_word_count",
-  "echo_results": []
-}
+```mermaid
+graph TD
+    subgraph View_Controller [main.py]
+        A1[MainWindow UI] -- User Input --> B1{Handles Events}
+        B1 -- Find Click --> C1[Calls model.process_text]
+        B1 -- Result Click --> D1[Updates Highlight Field]
+        E1[Model Signals] -- Update UI --> A1
+    end
+
+    subgraph Model [model.py]
+        F1[ProjectModel] -- Manages --> G1[Application Data & State]
+        F1 -- Receives Call --> H1[Creates & Runs EchoFinderWorker]
+        H1 -- on QThreadPool --> I1[Background Processing]
+        I1 -- Emits Signals --> E1
+    end
 ```
 
-#### Echo Phrase Object Structure (within `echo_results` list)
+-   **Model (`model.py`):** The `ProjectModel` class acts as the single source of truth. It encapsulates all application data (text, settings, results) in a dictionary. It handles file I/O for project files and is responsible for creating and dispatching the analysis worker to a `QThreadPool`.
+-   **View/Controller (`main.py`):** The `MainWindow` class constructs and manages all UI widgets. It handles user input events (clicks, text changes), sending requests to the model or updating its state directly. It connects to signals emitted by the model (e.g., `echo_results_updated`) to update the UI components accordingly.
+-   **Concurrency:** The computationally intensive echo-finding process is encapsulated in the `EchoFinderWorker` class, which inherits from `QRunnable`. This worker is executed in a background thread from a global `QThreadPool`, preventing the UI from freezing during analysis. It communicates results, status updates, and errors back to the main thread via a `WorkerSignals` object.
+
+### Data Model (Project JSON Structure)
+
+Project files are stored in a human-readable JSON format, capturing the complete state of an analysis session.
+
 ```json
 {
-  "phrase": "the turtle started running and then it smiled",
-  "count": 2,
-  "words": 8,
-  "occurrences": [
-    {"start": 0, "end": 45},
-    {"start": 50, "end": 95}
+  "project_name": "string",
+  "original_text": "string",
+  "min_phrase_words": "integer",
+  "max_phrase_words": "integer",
+  "custom_whitelist": ["string"],
+  "last_used_sort_preset": "string ('longest_first_by_word_count' or 'most_repeated_short_to_long')",
+  "echo_results": [
+    {
+      "phrase": "string",
+      "count": "integer",
+      "words": "integer",
+      "occurrences": [
+        {"start": "integer", "end": "integer"}
+      ]
+    }
   ]
 }
 ```
 
-### Algorithms
+### Core Algorithm (Echo Finding)
 
-1.  **Text Preprocessing:**
-    *   Convert `original_text` to lowercase.
-    *   Tokenize into a list of words, meticulously tracking original character indices for each token.
-    *   Strip common punctuation unless a word matches an entry in the `custom_whitelist`.
-    *   Calculate the maximum possible phrase length to update the UI's `Max Words` spin box limit.
-
-2.  **N-gram Generation & Frequency Counting:**
-    *   Generate all contiguous phrases (n-grams) within the user-selected `min_phrase_words` and `max_phrase_words` range.
-    *   Store each unique phrase in a hash map, aggregating its `count`, `words`, and a list of all `occurrences` (character index tuples).
-
-3.  **"Maximal Match" (Greedy) Filtering:**
-    *   After counting, filter the results to ensure that if a longer echo `P_long` is reported, no shorter echo that is a substring of `P_long` and whose occurrences are fully contained within `P_long`'s occurrences is also reported.
-
-4.  **Live Highlighting Logic:**
-    *   This logic resides in `main.py`. It clears all existing text formats. It then uses `QTextDocument.find()` in a loop to find all occurrences of the search string (case-insensitively). For each match, it applies a `QTextCharFormat` with a background color from `QApplication.palette().color(QPalette.ColorRole.Highlight)`.
-
-5.  **State Snapshotting Logic:**
-    *   A tuple containing the full narrative text, min/max word values, and a sorted tuple of whitelist items is created and stored after a successful analysis. The dirty check involves creating a new snapshot of the current inputs and comparing it to the stored one.
+The echo finding logic resides in the `EchoFinderWorker` class and follows these steps:
+1.  **Tokenization:** The input text is pre-processed into a list of word tokens. A regular expression is constructed that combines the custom whitelist with a general word pattern (`\b[a-zA-Z0-9'-]+\b`). `re.finditer` is used to find all matches. Each token stores the word itself and its start/end character indices from the original text. Whitelisted words are preserved case-sensitively; all other words are lowercased.
+2.  **N-gram Generation:** The system iterates through the token list using a sliding window approach, generating all possible phrases (n-grams) for every length `n` from `min_phrase_words` to `max_phrase_words`. A `defaultdict(list)` maps each unique phrase string to a list of its occurrence locations (start/end character indices).
+3.  **Frequency Filtering:** The resulting dictionary of phrases is filtered, keeping only items that have occurred two or more times.
+4.  **Maximal Match Filtering:** To provide the most useful results, sub-phrases are filtered out.
+    -   First, the list of echo phrases is sorted by the number of words in each phrase, in descending order.
+    -   The algorithm then iterates through this sorted list. For each `phrase`, it checks if it is a substring of any longer phrase that has *already been accepted* into the final `maximal_echoes` dictionary.
+    -   If it is a substring, it is discarded. Otherwise, it is added to the final results. This ensures only the longest, "maximal" repeated phrases are reported.
 
 ### Dependencies
--   **PySide6** (version >= 6.9.1)
--   Standard Python libraries.
 
-## Input/Output
+The application relies on a single external library:
+-   `PySide6` for the graphical user interface.
 
-### Input Specifications
--   **Text Input:** Raw text (string).
--   **`min_phrase_words` / `max_phrase_words`:** Integers.
--   **`custom_whitelist` entries:** List of strings.
--   **Sorting Preset Selection:** String ("longest_first_by_word_count", "most_repeated_short_to_long").
--   **Highlight Search:** String from the `Highlight` toolbar field.
--   **GUI Preferences:** Style name (string) and Theme ID (integer).
+### Persistence
 
-### Output Specifications
--   **`echo_results` Display:** `QTableWidget` rows: `Count`, `Words`, `Phrase`.
--   **Status Messages:** `QStatusBar` messages.
--   **Project Files:** `.json` files.
-
-## Error Handling and Validation
-
--   **File Errors:** `model.py` will catch file I/O and JSON parsing errors and report them via status messages.
--   **Empty/Insufficient Text:** The `Find Them / Find Again` button is disabled if the text is empty or has fewer words than the selected `Min Words` setting.
--   **Empty Whitelist Entry:** User is prevented from adding an empty string to the whitelist.
--   **No Echoes Found:** An informative message is displayed in the status bar.
--   **Robust Dirty State:** The state snapshotting method ensures the red border indicator is accurate and not prone to race conditions from programmatic UI updates.
-
-## Technical Constraints & Notes
-
--   **Text Volume:** Should handle text equivalent to ~6 book chapters.
--   **Responsiveness:** Long-running text processing must be offloaded to a `QThread` to keep the UI responsive. Live highlighting must be performant.
--   **Platform:** Primary target platform is Windows 10, but should be cross-platform compatible.
--   **Python-only:** No external APIs or runtime AI/LLM models are used.
-
-## Acceptance Criteria
-
-1.  **Core Echo Detection & Maximal Match Logic:**
-    *   Given the test text `"The turtle started running and then it smiled and then the turtle started running and then it smiled..."`, the application correctly identifies ` "the turtle started running and then it smiled"` as the sole maximal match with a count of 2 and hides all shorter, contained echoes.
-
-2.  **Live Highlighting and Count Update:**
-    *   Clicking a result row highlights all occurrences of its phrase in the main text.
-    *   Typing in the highlight field also triggers highlighting.
-    *   Editing the main text causes highlights to update their positions correctly in real-time.
-    *   Deleting a highlighted phrase in the text updates the `Count` in the results table for that phrase.
-    *   Clearing the highlight field removes all highlights.
-
-3.  **Persistent Settings:**
-    *   Changing the theme to `Dark`, closing, and re-opening the application launches it in `Dark` theme.
-    *   Changing the sort preset to `Most Repeated`, closing, and re-opening the application starts a new project with that preset selected.
-
-4.  **Robust Dirty State:**
-    *   Clicking `Find Them / Find Again` removes the red border. The border does not reappear until the user makes a meaningful change to the text, word count settings, or whitelist.
-
-5.  **UI Customization:**
-    *   Selecting a new `Appearance` style or `Theme` from the `Edit` menu instantly updates the application's look and feel.
+-   **Project Data:** The entire session state (text, settings, results) is saved and loaded by the user via the `File` menu into `.json` files.
+-   **UI Settings:** Application-level settings like window size and position, current theme, and UI style are automatically saved on exit and restored on launch using `QSettings` under the organization name "fernicar" and application name "echo_finder_TINS_Edition".
