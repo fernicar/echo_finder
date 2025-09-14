@@ -72,8 +72,6 @@ class EchoFinderWorker(QRunnable):
 
             self.signals.status.emit("Processing: Filtering for maximal matches...")
             
-            # Sort echoes by word count (desc) to prioritize longer matches
-            # CORRECTED: Was sorting by character length, now correctly sorts by word count.
             sorted_echo_phrases = sorted(echoes.keys(), key=lambda p: len(p.split()), reverse=True)
             
             maximal_echoes = {}
@@ -135,9 +133,8 @@ class ProjectModel(QObject):
         self.threadpool = QThreadPool()
         self.current_project_path = None
         self.data = {}
-        self.new_project()
 
-    def new_project(self):
+    def new_project(self, preferred_preset="longest_first_by_word_count"):
         self.current_project_path = None
         self.data = {
             "project_name": "Unnamed Project",
@@ -145,7 +142,7 @@ class ProjectModel(QObject):
             "min_phrase_words": 2,
             "max_phrase_words": 8,
             "custom_whitelist": ["Dr.", "Mr.", "Mrs.", "St.", "e.g.", "i.e."],
-            "last_used_sort_preset": "most_repeated_short_to_long",
+            "last_used_sort_preset": preferred_preset,
             "echo_results": []
         }
         self.project_loaded.emit(self.data)
@@ -200,7 +197,7 @@ class ProjectModel(QObject):
 
     @Slot()
     def sort_results(self):
-        preset = self.data.get("last_used_sort_preset", "most_repeated_short_to_long")
+        preset = self.data.get("last_used_sort_preset", "longest_first_by_word_count")
         results = self.data.get("echo_results", [])
         
         if preset == "most_repeated_short_to_long":
