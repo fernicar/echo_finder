@@ -43,8 +43,9 @@ class MainWindow(QMainWindow):
         self.narrative_text_edit.setPlaceholderText("Paste or type your narrative text here...")
         
         self.results_table = QTableWidget()
+        # CHANGED: Reordered columns and renamed 'Length' to 'Words'
         self.results_table.setColumnCount(3)
-        self.results_table.setHorizontalHeaderLabels(["Phrase", "Count", "Length"])
+        self.results_table.setHorizontalHeaderLabels(["Count", "Words", "Phrase"])
         self.results_table.horizontalHeader().setStretchLastSection(True)
         self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -108,7 +109,15 @@ class MainWindow(QMainWindow):
         action_paste = QAction("&Paste from Clipboard", self)
         action_paste.setShortcut(QKeySequence.StandardKey.Paste)
         action_paste.triggered.connect(self.narrative_text_edit.paste)
+        
+        # NEW: 'Auto Copy' checkable action
+        self.action_auto_copy = QAction("Auto Copy Phrase to Clipboard", self)
+        self.action_auto_copy.setCheckable(True)
+        self.action_auto_copy.setChecked(True) # Enabled by default
+
         edit_menu.addAction(action_paste)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.action_auto_copy)
 
         # Help Actions
         action_about = QAction("&About echo_finder", self)
@@ -120,9 +129,9 @@ class MainWindow(QMainWindow):
         toolbar.setIconSize(QSize(16, 16))
         self.addToolBar(toolbar)
 
-        toolbar.addWidget(QLabel("Min Length: 2"))
+        toolbar.addWidget(QLabel("Min Words: 2"))
         
-        toolbar.addWidget(QLabel("  Max Length: "))
+        toolbar.addWidget(QLabel("  Max Words: "))
         self.max_len_spinbox = QSpinBox()
         self.max_len_spinbox.setMinimum(2)
         self.max_len_spinbox.setValue(8)
@@ -157,6 +166,10 @@ class MainWindow(QMainWindow):
         # Whitelist buttons
         self.add_whitelist_button.clicked.connect(self.on_add_whitelist)
         self.remove_whitelist_button.clicked.connect(self.on_remove_whitelist)
+        
+        # NEW: Connect table click signal for copy-to-clipboard
+        self.results_table.cellClicked.connect(self.on_result_cell_clicked)
+
 
     # --- Slots for Model Signals ---
 
@@ -182,10 +195,12 @@ class MainWindow(QMainWindow):
         self.results_table.setRowCount(0)
         self.results_table.setRowCount(len(results))
         for row, item in enumerate(results):
-            self.results_table.setItem(row, 0, QTableWidgetItem(item['phrase']))
-            self.results_table.setItem(row, 1, QTableWidgetItem(str(item['count'])))
-            self.results_table.setItem(row, 2, QTableWidgetItem(str(item['length'])))
+            # CHANGED: Populate in the new column order
+            self.results_table.setItem(row, 0, QTableWidgetItem(str(item['count'])))
+            self.results_table.setItem(row, 1, QTableWidgetItem(str(item['length'])))
+            self.results_table.setItem(row, 2, QTableWidgetItem(item['phrase']))
         self.results_table.resizeColumnsToContents()
+        self.results_table.horizontalHeader().setStretchLastSection(True)
 
     @Slot(list)
     def update_whitelist_display(self, whitelist):
@@ -201,6 +216,20 @@ class MainWindow(QMainWindow):
             self.max_len_spinbox.setValue(max_len)
 
     # --- Slots for UI Events ---
+
+    # NEW: Slot for handling clicks on the results table
+    @Slot(int, int)
+    def on_result_cell_clicked(self, row, column):
+        if not self.action_auto_copy.isChecked():
+            return
+            
+        # The phrase is in the 3rd column (index 2)
+        phrase_item = self.results_table.item(row, 2)
+        if phrase_item:
+            phrase_text = phrase_item.text()
+            clipboard = QApplication.clipboard()
+            clipboard.setText(phrase_text)
+            self.status_bar.showMessage(f"Copied to clipboard: '{phrase_text}'", 4000) # Message disappears after 4s
 
     def on_new_project(self):
         self.model.new_project()
