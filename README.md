@@ -4,7 +4,7 @@ A smart tool for writers to find and eliminate repetitive phrases (echoes) in th
 
 ![app_capture0](images/app_capture0.png)
 
-<video controls src="video/demo.mp4" title="Title"></video>
+https://github.com/user-attachments/assets/a8edbe24-b0ee-4799-8381-96c4851cb8a1
 
 ## About The Project
 
