@@ -4,9 +4,7 @@ A smart tool for writers to find and eliminate repetitive phrases (echoes) in th
 
 ![app_capture0](images/app_capture0.png)
 
-<video src="video/demo.mp4" controls width="1024">
-  Your browser does not support the video tag.
-</video>
+<video controls src="video/demo.mp4" title="Title"></video>
 
 ## About The Project
 
