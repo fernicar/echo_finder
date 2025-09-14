@@ -1,6 +1,6 @@
 # echo_finder_TINS_Edition
 
-A smart tool for writers to find and eliminate repetitive phrases (echoes) in their text.
+A smart tool for writers to find and eliminate repetitive phrases (echoes) in LLMs text.
 
 https://github.com/user-attachments/assets/bd027f8b-33dd-4b74-9d03-632259f9a7f9
 
