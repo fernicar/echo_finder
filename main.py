@@ -43,7 +43,6 @@ class MainWindow(QMainWindow):
         self.narrative_text_edit.setPlaceholderText("Paste or type your narrative text here...")
         
         self.results_table = QTableWidget()
-        # CHANGED: Reordered columns and renamed 'Length' to 'Words'
         self.results_table.setColumnCount(3)
         self.results_table.setHorizontalHeaderLabels(["Count", "Words", "Phrase"])
         self.results_table.horizontalHeader().setStretchLastSection(True)
@@ -73,7 +72,7 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.narrative_text_edit)
         main_splitter.addWidget(self.results_table)
         main_splitter.addWidget(whitelist_widget)
-        main_splitter.setSizes([400, 300, 100]) # Initial sizing
+        main_splitter.setSizes([400, 300, 100])
 
         # --- Menu Bar ---
         menu_bar = self.menuBar()
@@ -110,10 +109,9 @@ class MainWindow(QMainWindow):
         action_paste.setShortcut(QKeySequence.StandardKey.Paste)
         action_paste.triggered.connect(self.narrative_text_edit.paste)
         
-        # NEW: 'Auto Copy' checkable action
         self.action_auto_copy = QAction("Auto Copy Phrase to Clipboard", self)
         self.action_auto_copy.setCheckable(True)
-        self.action_auto_copy.setChecked(True) # Enabled by default
+        self.action_auto_copy.setChecked(True)
 
         edit_menu.addAction(action_paste)
         edit_menu.addSeparator()
@@ -129,13 +127,22 @@ class MainWindow(QMainWindow):
         toolbar.setIconSize(QSize(16, 16))
         self.addToolBar(toolbar)
 
-        toolbar.addWidget(QLabel("Min Words: 2"))
+        # CHANGED: Replaced QLabel with a QSpinBox for min length
+        toolbar.addWidget(QLabel("Min Length:"))
+        self.min_len_spinbox = QSpinBox()
+        self.min_len_spinbox.setMinimum(2)
+        self.min_len_spinbox.setValue(2)
+        toolbar.addWidget(self.min_len_spinbox)
         
-        toolbar.addWidget(QLabel("  Max Words: "))
+        toolbar.addWidget(QLabel("  Max Length: "))
         self.max_len_spinbox = QSpinBox()
         self.max_len_spinbox.setMinimum(2)
         self.max_len_spinbox.setValue(8)
         toolbar.addWidget(self.max_len_spinbox)
+
+        # Set initial dependency for spin boxes
+        self.min_len_spinbox.setMaximum(self.max_len_spinbox.value())
+        self.max_len_spinbox.setMinimum(self.min_len_spinbox.value())
 
         self.process_button = QPushButton("Find Them / Find Again")
         self.process_button.setToolTip("Process the text to find echoes")
@@ -160,14 +167,16 @@ class MainWindow(QMainWindow):
         # UI -> Model / UI Logic
         self.process_button.clicked.connect(self.on_process_text)
         self.narrative_text_edit.textChanged.connect(self.on_text_changed)
-        self.max_len_spinbox.valueChanged.connect(lambda: self.set_dirty(True))
         self.preset_combo.currentIndexChanged.connect(self.on_preset_changed)
+        
+        # CHANGED: Added connections for interdependent spin boxes
+        self.min_len_spinbox.valueChanged.connect(self.on_min_len_changed)
+        self.max_len_spinbox.valueChanged.connect(self.on_max_len_changed)
         
         # Whitelist buttons
         self.add_whitelist_button.clicked.connect(self.on_add_whitelist)
         self.remove_whitelist_button.clicked.connect(self.on_remove_whitelist)
         
-        # NEW: Connect table click signal for copy-to-clipboard
         self.results_table.cellClicked.connect(self.on_result_cell_clicked)
 
 
@@ -176,6 +185,9 @@ class MainWindow(QMainWindow):
     @Slot(dict)
     def on_project_loaded(self, data):
         self.narrative_text_edit.setText(data.get("original_text", ""))
+        
+        # CHANGED: Load value for the new min_len_spinbox
+        self.min_len_spinbox.setValue(data.get("min_phrase_length", 2))
         self.max_len_spinbox.setValue(data.get("max_phrase_length", 8))
         
         preset_id = data.get("last_used_sort_preset", "most_repeated_short_to_long")
@@ -195,7 +207,6 @@ class MainWindow(QMainWindow):
         self.results_table.setRowCount(0)
         self.results_table.setRowCount(len(results))
         for row, item in enumerate(results):
-            # CHANGED: Populate in the new column order
             self.results_table.setItem(row, 0, QTableWidgetItem(str(item['count'])))
             self.results_table.setItem(row, 1, QTableWidgetItem(str(item['length'])))
             self.results_table.setItem(row, 2, QTableWidgetItem(item['phrase']))
@@ -211,25 +222,33 @@ class MainWindow(QMainWindow):
     @Slot(int)
     def on_max_len_available(self, max_len):
         self.max_len_spinbox.setMaximum(max(2, max_len))
-        # Clamp value if it's now out of bounds
         if self.max_len_spinbox.value() > max_len:
             self.max_len_spinbox.setValue(max_len)
 
     # --- Slots for UI Events ---
 
-    # NEW: Slot for handling clicks on the results table
     @Slot(int, int)
     def on_result_cell_clicked(self, row, column):
         if not self.action_auto_copy.isChecked():
             return
             
-        # The phrase is in the 3rd column (index 2)
         phrase_item = self.results_table.item(row, 2)
         if phrase_item:
             phrase_text = phrase_item.text()
             clipboard = QApplication.clipboard()
             clipboard.setText(phrase_text)
-            self.status_bar.showMessage(f"Copied to clipboard: '{phrase_text}'", 4000) # Message disappears after 4s
+            self.status_bar.showMessage(f"Copied to clipboard: '{phrase_text}'", 4000)
+
+    # NEW: Slots to handle interdependent spin boxes
+    @Slot(int)
+    def on_min_len_changed(self, value):
+        self.max_len_spinbox.setMinimum(value)
+        self.set_dirty(True)
+
+    @Slot(int)
+    def on_max_len_changed(self, value):
+        self.min_len_spinbox.setMaximum(value)
+        self.set_dirty(True)
 
     def on_new_project(self):
         self.model.new_project()
@@ -309,18 +328,19 @@ class MainWindow(QMainWindow):
         
     def _save_current_data_to_model(self):
         self.model.update_data("original_text", self.narrative_text_edit.toPlainText())
+        # CHANGED: Save the new min_len value
+        self.model.update_data("min_phrase_length", self.min_len_spinbox.value())
         self.model.update_data("max_phrase_length", self.max_len_spinbox.value())
     
     def update_process_button_state(self):
-        # Disable button if text has fewer than 2 words
         text = self.narrative_text_edit.toPlainText()
         word_count = len(re.findall(r'\b\w+\b', text))
-        self.process_button.setEnabled(word_count >= 2)
+        self.process_button.setEnabled(word_count >= self.min_len_spinbox.value())
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyle("Fusion") # Consistent modern look
+    app.setStyle("Fusion")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
