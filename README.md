@@ -8,9 +8,9 @@ https://github.com/user-attachments/assets/a8edbe24-b0ee-4799-8381-96c4851cb8a1
 
 ## About The Project
 
-`echo_finder` is a desktop application designed specifically for writers, editors, and content creators who want to improve the quality and flow of their narrative. It goes beyond simple word counting to intelligently identify and highlight redundant phrases, helping you create fresher, more engaging text.
+`echo_finder_TINS_Edition` is a desktop application designed specifically for writers, editors, and content creators who want to improve the quality and flow of their narrative. It goes beyond simple word counting to intelligently identify and highlight redundant phrases, helping you create fresher, more engaging text.
 
-The core of `echo_finder` is its "Maximal Match" logic. Instead of overwhelming you with every minor repetition, it focuses on the **longest possible repeating sequences**, giving you the most significant and actionable insights to refine your work.
+The core of `echo_finder_TINS_Edition` is its "Maximal Match" logic. Instead of overwhelming you with every minor repetition, it focuses on the **longest possible repeating sequences**, giving you the most significant and actionable insights to refine your work.
 
 ### Key Features
 
@@ -25,14 +25,14 @@ The core of `echo_finder` is its "Maximal Match" logic. Instead of overwhelming 
 
 ### Built With
 
-`echo_finder` is built with modern, robust technologies to ensure performance and a clean user experience.
+`echo_finder_TINS_Edition` is built with modern, robust technologies to ensure performance and a clean user experience.
 
 *   [**PySide6**](https://www.qt.io/qt-for-python): The official Python bindings for the Qt framework, used for building the entire graphical user interface.
 *   **Regular Expression Tokenizer**: The core text processing engine is built using Python's native `re` module. This powerful approach allows for precise and flexible tokenization, ignoring punctuation while respecting a custom whitelist, which is crucial for accurate echo detection across sentence boundaries.
 
 ## Getting Started
 
-Follow these steps to get `echo_finder` running on your local machine.
+Follow these steps to get `echo_finder_TINS_Edition` running on your local machine.
 
 ### Prerequisites
 
@@ -42,11 +42,11 @@ Follow these steps to get `echo_finder` running on your local machine.
 
 1.  **Clone the repository:**
     ```sh
-    git clone https://github.com/fernicar/echo_finder.git
+    git clone https://github.com/fernicar/echo_finder_TINS_Edition.git
     ```
 2.  **Navigate to the project directory:**
     ```sh
-    cd echo_finder
+    cd echo_finder_TINS_Edition
     ```
 3.  **Create and activate a virtual environment (recommended):**
     -   On Windows:

@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("echo_finder")
+        self.setWindowTitle("echo_finder_TINS_Edition")
         self.setGeometry(100, 100, 1200, 800)
 
         self.settings = QSettings()
@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
             self.theme_menu.addAction(action)
             self.theme_action_group.addAction(action)
 
-        action_about = QAction("&About echo_finder", self)
+        action_about = QAction("&About echo_finder_TINS_Edition", self)
         action_about.triggered.connect(self.on_about)
 
         help_menu.addAction(action_about)
@@ -237,7 +237,7 @@ class MainWindow(QMainWindow):
         self.update_whitelist_display(data.get("custom_whitelist", []))
         self.update_results_table(data.get("echo_results", []))
 
-        self.setWindowTitle(f"echo_finder - {data.get('project_name', 'Unnamed Project')}")
+        self.setWindowTitle(f"echo_finder_TINS_Edition - {data.get('project_name', 'Unnamed Project')}")
         self.highlight_field.clear()
         
         # A newly loaded project is clean. We take its snapshot.
@@ -299,7 +299,7 @@ class MainWindow(QMainWindow):
         if filepath:
             self._save_current_data_to_model()
             self.model.save_project(filepath)
-            self.setWindowTitle(f"echo_finder - {self.model.data['project_name']}")
+            self.setWindowTitle(f"echo_finder_TINS_Edition - {self.model.data['project_name']}")
 
     def on_process_text(self):
         self.highlight_field.clear()
@@ -416,7 +416,7 @@ class MainWindow(QMainWindow):
         self._check_dirty_state()
 
     def on_about(self):
-        QMessageBox.about(self, "About echo_finder", "<b>echo_finder</b><p>A tool to analyze repeated phrases in text.</p><p>License: MIT</p><p>Copyright: fernicar</p><p>Repository: <a href='https://github.com/fernicar/echo_finder'>github.com/fernicar/echo_finder</a></p>")
+        QMessageBox.about(self, "About echo_finder_TINS_Edition", "<b>echo_finder_TINS_Edition</b><p>A tool to analyze repeated phrases in text.</p><p>License: MIT</p><p>Copyright: fernicar</p><p>Repository: <a href='https://github.com/fernicar/echo_finder_TINS_Edition'>github.com/fernicar/echo_finder_TINS_Edition</a></p>")
 
     def _save_current_data_to_model(self):
         self.model.update_data("original_text", self.narrative_text_edit.toPlainText())
@@ -442,7 +442,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     QCoreApplication.setOrganizationName("fernicar")
-    QCoreApplication.setApplicationName("echo_finder")
+    QCoreApplication.setApplicationName("echo_finder_TINS_Edition")
     settings = QSettings()
 
     apply_app_settings(settings)

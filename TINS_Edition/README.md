@@ -1,5 +1,5 @@
 ## Description
-`echo_finder` is a minimalist desktop application designed to identify and highlight redundant or excessively repeated phrases ("echoes") within narrative text. It helps users refine their writing by pinpointing repetitive phrasing, focusing on the "longest possible repeating sequences" to provide actionable insights for intervention. The application prioritizes clear identification over real-time editing, allowing users to analyze text and then make informed decisions to improve narrative flow.
+`echo_finder_TINS_Edition` is a minimalist desktop application designed to identify and highlight redundant or excessively repeated phrases ("echoes") within narrative text. It helps users refine their writing by pinpointing repetitive phrasing, focusing on the "longest possible repeating sequences" to provide actionable insights for intervention. The application prioritizes clear identification over real-time editing, allowing users to analyze text and then make informed decisions to improve narrative flow.
 
 ## Functionality
 
@@ -20,7 +20,7 @@ The main application window will be a PySide6 desktop application using the 'Fus
 
 ```mermaid
 graph TD
-    A[Main Window (echo_finder)] --> B[Menu Bar]
+    A[Main Window (echo_finder_TINS_Edition)] --> B[Menu Bar]
     A --> C["Splitter 1 (Vertical)"]
     C --> D["Narrative Text Area (QTextEdit)"]
     C --> E["Splitter 2 (Vertical)"]
@@ -41,7 +41,7 @@ graph TD
 -   **Edit:**
     -   `Paste from Clipboard (Ctrl+V)`: Pastes system clipboard content into `Narrative Text Area`.
 -   **Help:**
-    -   `About`: Displays a `QMessageBox` with "echo_finder", "License: MIT", "Copyright: fernicar", "Repository: [link to fernicar/echo_finder]".
+    -   `About`: Displays a `QMessageBox` with "echo_finder_TINS_Edition", "License: MIT", "Copyright: fernicar", "Repository: [link to fernicar/echo_finder_TINS_Edition]".
 
 #### Narrative Text Area (`QTextEdit`)
 -   A large, multi-line `QTextEdit` widget for displaying and editing the narrative text.
@@ -180,7 +180,7 @@ The application will adhere to a clear separation of concerns:
 
 ## Acceptance Criteria
 
-The generated `echo_finder` application will be verified against the following test cases:
+The generated `echo_finder_TINS_Edition` application will be verified against the following test cases:
 
 1.  **Core Echo Detection & Maximal Match (Greedy) Logic:**
     *   **Test Case 1 (User Provided - Maximal Match):**
