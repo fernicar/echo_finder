@@ -1,10 +1,10 @@
-# echo_finder
+# echo_finder_TINS_Edition
 
 A smart tool for writers to find and eliminate repetitive phrases (echoes) in their text.
 
-![app_capture0](images/app_capture0.png)
+https://github.com/user-attachments/assets/bd027f8b-33dd-4b74-9d03-632259f9a7f9
 
-https://github.com/user-attachments/assets/a8edbe24-b0ee-4799-8381-96c4851cb8a1
+![app_capture0](images/app_capture0.png)
 
 ## About The Project
 
