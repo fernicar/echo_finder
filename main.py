@@ -26,12 +26,27 @@ class MainWindow(QMainWindow):
         self.settings = QSettings()
 
         self.model = ProjectModel()
-        self.is_dirty = False
+        self.last_clean_state = None # This will hold the snapshot of the "clean" state
 
         self._setup_ui()
         self._connect_signals()
 
         self.on_new_project()
+
+    def _get_current_state_snapshot(self):
+        """Captures the current state of all user inputs that affect processing."""
+        whitelist_items = [self.whitelist_list.item(i).text() for i in range(self.whitelist_list.count())]
+        return (
+            self.narrative_text_edit.toPlainText(),
+            self.min_words_spinbox.value(),
+            self.max_words_spinbox.value(),
+            tuple(sorted(whitelist_items)) # Use a tuple of sorted items for consistent comparison
+        )
+
+    def _check_dirty_state(self):
+        """Compares current state to the last clean state and updates the UI."""
+        is_dirty = self._get_current_state_snapshot() != self.last_clean_state
+        self.narrative_text_edit.setStyleSheet("border: 1px solid red;" if is_dirty else "")
 
     def _setup_ui(self):
         main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -123,10 +138,9 @@ class MainWindow(QMainWindow):
         self.theme_menu = edit_menu.addMenu("Theme")
         self.theme_action_group = QActionGroup(self)
         self.theme_action_group.setExclusive(True)
-        
-        # We store the integer value of the enum in settings
+
         current_theme = self.settings.value("gui/theme", Qt.ColorScheme.Unknown, type=int)
-        
+
         theme_map = {
             "Auto (System Default)": Qt.ColorScheme.Unknown,
             "Light": Qt.ColorScheme.Light,
@@ -139,7 +153,6 @@ class MainWindow(QMainWindow):
                 action.setChecked(True)
             self.theme_menu.addAction(action)
             self.theme_action_group.addAction(action)
-
 
         action_about = QAction("&About echo_finder", self)
         action_about.triggered.connect(self.on_about)
@@ -180,7 +193,7 @@ class MainWindow(QMainWindow):
         # --- Debounce Timer for Highlighting ---
         self.debounce_timer = QTimer(self)
         self.debounce_timer.setSingleShot(True)
-        self.debounce_timer.setInterval(250)  # 250ms delay
+        self.debounce_timer.setInterval(250)
 
     def _connect_signals(self):
         # Model -> UI
@@ -193,14 +206,13 @@ class MainWindow(QMainWindow):
         # UI -> Model / UI Logic
         self.process_button.clicked.connect(self.on_process_text)
         self.preset_combo.currentIndexChanged.connect(self.on_preset_changed)
-        self.min_words_spinbox.valueChanged.connect(self.on_min_words_changed)
-        self.max_words_spinbox.valueChanged.connect(self.on_max_words_changed)
+        self.min_words_spinbox.valueChanged.connect(self._check_dirty_state) # Connect to checker
+        self.max_words_spinbox.valueChanged.connect(self._check_dirty_state) # Connect to checker
 
         self.add_whitelist_button.clicked.connect(self.on_add_whitelist)
         self.remove_whitelist_button.clicked.connect(self.on_remove_whitelist)
         self.results_table.cellClicked.connect(self.on_result_cell_clicked)
-        
-        # Appearance and Theme switching
+
         self.style_action_group.triggered.connect(self.on_style_changed)
         self.theme_action_group.triggered.connect(self.on_theme_changed)
 
@@ -213,17 +225,10 @@ class MainWindow(QMainWindow):
 
     @Slot(dict)
     def on_project_loaded(self, data):
-        self.min_words_spinbox.blockSignals(True)
-        self.max_words_spinbox.blockSignals(True)
-
         self.narrative_text_edit.setText(data.get("original_text", ""))
         self.min_words_spinbox.setValue(data.get("min_phrase_words", 2))
         self.max_words_spinbox.setValue(data.get("max_phrase_words", 8))
 
-        self.min_words_spinbox.blockSignals(False)
-        self.max_words_spinbox.blockSignals(False)
-        
-        # Project-specific preset overrides the global default
         preset_id = data.get("last_used_sort_preset", self.settings.value("last_used_sort_preset", "longest_first_by_word_count"))
         index = self.preset_combo.findData(preset_id)
         if index >= 0:
@@ -234,7 +239,10 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"echo_finder - {data.get('project_name', 'Unnamed Project')}")
         self.highlight_field.clear()
-        self.set_dirty(False)
+        
+        # A newly loaded project is clean. We take its snapshot.
+        self.last_clean_state = self._get_current_state_snapshot()
+        self._check_dirty_state()
         self.update_process_button_state()
 
     @Slot(list)
@@ -243,26 +251,31 @@ class MainWindow(QMainWindow):
         self.results_table.setRowCount(len(results))
         for row, item in enumerate(results):
             count_item = QTableWidgetItem(str(item['count']))
-            count_item.setData(Qt.ItemDataRole.UserRole, item['count'])  # Store original count
+            count_item.setData(Qt.ItemDataRole.UserRole, item['count'])
             self.results_table.setItem(row, 0, count_item)
             self.results_table.setItem(row, 1, QTableWidgetItem(str(item['words'])))
             self.results_table.setItem(row, 2, QTableWidgetItem(item['phrase']))
         self.results_table.resizeColumnsToContents()
         self.results_table.horizontalHeader().setStretchLastSection(True)
 
+        # The analysis is done and results are displayed. This is the new "clean" state.
+        self.last_clean_state = self._get_current_state_snapshot()
+        self._check_dirty_state()
+
     @Slot(list)
     def update_whitelist_display(self, whitelist):
         self.whitelist_list.clear()
         self.whitelist_list.addItems(whitelist)
+        self._check_dirty_state() # A whitelist change can make the state dirty
 
     @Slot(int)
     def on_max_words_available(self, max_words):
-        self.max_words_spinbox.blockSignals(True)
+        current_max = self.max_words_spinbox.value()
         self.max_words_spinbox.setMaximum(max(2, max_words))
-        if self.max_words_spinbox.value() > max_words:
+        # Only set value if it's out of new bounds, to not trigger valueChanged unnecessarily
+        if current_max > max_words:
             self.max_words_spinbox.setValue(max_words)
-        self.max_words_spinbox.blockSignals(False)
-
+    
     def on_new_project(self):
         self._clear_highlights()
         saved_preset = self.settings.value("last_used_sort_preset", "longest_first_by_word_count")
@@ -289,13 +302,12 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"echo_finder - {self.model.data['project_name']}")
 
     def on_process_text(self):
-        self.set_dirty(False)
         self.highlight_field.clear()
         self._save_current_data_to_model()
         self.model.process_text()
 
     def on_narrative_text_changed(self):
-        self.set_dirty(True)
+        self._check_dirty_state()
         self.update_process_button_state()
         self.debounce_timer.start()
 
@@ -319,16 +331,6 @@ class MainWindow(QMainWindow):
         theme_id = action.data()
         QApplication.styleHints().setColorScheme(theme_id)
         self.settings.setValue("gui/theme", theme_id)
-
-    @Slot(int)
-    def on_min_words_changed(self, value):
-        self.max_words_spinbox.setMinimum(value)
-        self.set_dirty(True)
-
-    @Slot(int)
-    def on_max_words_changed(self, value):
-        self.min_words_spinbox.setMaximum(value)
-        self.set_dirty(True)
 
     @Slot(int, int)
     def on_result_cell_clicked(self, row, column):
@@ -380,7 +382,6 @@ class MainWindow(QMainWindow):
             found_count += 1
             cursor.mergeCharFormat(highlight_format)
 
-        # Update results table with live counts
         for row in range(self.results_table.rowCount()):
             phrase_item = self.results_table.item(row, 2)
             count_item = self.results_table.item(row, 0)
@@ -397,14 +398,13 @@ class MainWindow(QMainWindow):
                     count_item.setText(str(original_count))
                     count_item.setForeground(QApplication.palette().text().color())
 
-
     # --- Other UI Methods ---
 
     def on_add_whitelist(self):
         text, ok = QInputDialog.getText(self, "Add Whitelist Entry", "Enter abbreviation:")
         if ok and text.strip():
             self.model.add_whitelist_entry(text.strip())
-            self.set_dirty(True)
+            self._check_dirty_state()
 
     def on_remove_whitelist(self):
         selected_items = self.whitelist_list.selectedItems()
@@ -413,14 +413,10 @@ class MainWindow(QMainWindow):
             return
         for item in selected_items:
             self.model.remove_whitelist_entry(item.text())
-        self.set_dirty(True)
+        self._check_dirty_state()
 
     def on_about(self):
         QMessageBox.about(self, "About echo_finder", "<b>echo_finder</b><p>A tool to analyze repeated phrases in text.</p><p>License: MIT</p><p>Copyright: fernicar</p><p>Repository: <a href='https://github.com/fernicar/echo_finder'>github.com/fernicar/echo_finder</a></p>")
-
-    def set_dirty(self, is_dirty):
-        self.is_dirty = is_dirty
-        self.narrative_text_edit.setStyleSheet("border: 1px solid red;" if is_dirty else "")
 
     def _save_current_data_to_model(self):
         self.model.update_data("original_text", self.narrative_text_edit.toPlainText())
@@ -434,25 +430,23 @@ class MainWindow(QMainWindow):
 
 def apply_app_settings(settings):
     """Reads persistent settings and applies them to the application instance."""
-    # Apply Style (e.g., "Fusion", "Windows")
     available_styles = QStyleFactory.keys()
     saved_style = settings.value("gui/style", "Fusion")
     if saved_style in available_styles:
         QApplication.setStyle(saved_style)
-    
-    # Apply Theme (Light/Dark/Auto)
+
     theme_id = settings.value("gui/theme", Qt.ColorScheme.Unknown, type=int)
     QApplication.styleHints().setColorScheme(Qt.ColorScheme(theme_id))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    
+
     QCoreApplication.setOrganizationName("fernicar")
     QCoreApplication.setApplicationName("echo_finder")
     settings = QSettings()
-    
+
     apply_app_settings(settings)
-    
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
