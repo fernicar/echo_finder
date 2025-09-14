@@ -112,13 +112,13 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         toolbar.addWidget(QLabel("Min Words:"))
-        self.min_words_spinbox = QSpinBox() # REFACTORED
+        self.min_words_spinbox = QSpinBox()
         self.min_words_spinbox.setMinimum(2)
         self.min_words_spinbox.setValue(2)
         toolbar.addWidget(self.min_words_spinbox)
         
         toolbar.addWidget(QLabel("  Max Words: "))
-        self.max_words_spinbox = QSpinBox() # REFACTORED
+        self.max_words_spinbox = QSpinBox()
         self.max_words_spinbox.setMinimum(2)
         self.max_words_spinbox.setValue(8)
         toolbar.addWidget(self.max_words_spinbox)
@@ -142,14 +142,14 @@ class MainWindow(QMainWindow):
         self.model.status_message.connect(self.status_bar.showMessage)
         self.model.echo_results_updated.connect(self.update_results_table)
         self.model.whitelist_updated.connect(self.update_whitelist_display)
-        self.model.max_words_available.connect(self.on_max_words_available) # REFACTORED
+        self.model.max_words_available.connect(self.on_max_words_available)
 
         self.process_button.clicked.connect(self.on_process_text)
         self.narrative_text_edit.textChanged.connect(self.on_text_changed)
         self.preset_combo.currentIndexChanged.connect(self.on_preset_changed)
         
-        self.min_words_spinbox.valueChanged.connect(self.on_min_words_changed) # REFACTORED
-        self.max_words_spinbox.valueChanged.connect(self.on_max_words_changed) # REFACTORED
+        self.min_words_spinbox.valueChanged.connect(self.on_min_words_changed)
+        self.max_words_spinbox.valueChanged.connect(self.on_max_words_changed)
         
         self.add_whitelist_button.clicked.connect(self.on_add_whitelist)
         self.remove_whitelist_button.clicked.connect(self.on_remove_whitelist)
@@ -158,8 +158,8 @@ class MainWindow(QMainWindow):
     @Slot(dict)
     def on_project_loaded(self, data):
         self.narrative_text_edit.setText(data.get("original_text", ""))
-        self.min_words_spinbox.setValue(data.get("min_phrase_words", 2)) # REFACTORED
-        self.max_words_spinbox.setValue(data.get("max_phrase_words", 8)) # REFACTORED
+        self.min_words_spinbox.setValue(data.get("min_phrase_words", 2))
+        self.max_words_spinbox.setValue(data.get("max_phrase_words", 8))
         
         preset_id = data.get("last_used_sort_preset", "most_repeated_short_to_long")
         index = self.preset_combo.findData(preset_id)
@@ -178,7 +178,7 @@ class MainWindow(QMainWindow):
         self.results_table.setRowCount(len(results))
         for row, item in enumerate(results):
             self.results_table.setItem(row, 0, QTableWidgetItem(str(item['count'])))
-            self.results_table.setItem(row, 1, QTableWidgetItem(str(item['words']))) # REFACTORED
+            self.results_table.setItem(row, 1, QTableWidgetItem(str(item['words'])))
             self.results_table.setItem(row, 2, QTableWidgetItem(item['phrase']))
         self.results_table.resizeColumnsToContents()
         self.results_table.horizontalHeader().setStretchLastSection(True)
@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         self.whitelist_list.addItems(whitelist)
 
     @Slot(int)
-    def on_max_words_available(self, max_words): # REFACTORED
+    def on_max_words_available(self, max_words):
         self.max_words_spinbox.setMaximum(max(2, max_words))
         if self.max_words_spinbox.value() > max_words:
             self.max_words_spinbox.setValue(max_words)
@@ -204,12 +204,12 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Copied to clipboard: '{phrase_item.text()}'", 4000)
 
     @Slot(int)
-    def on_min_words_changed(self, value): # REFACTORED
+    def on_min_words_changed(self, value):
         self.max_words_spinbox.setMinimum(value)
         self.set_dirty(True)
 
     @Slot(int)
-    def on_max_words_changed(self, value): # REFACTORED
+    def on_max_words_changed(self, value):
         self.min_words_spinbox.setMaximum(value)
         self.set_dirty(True)
 
@@ -269,8 +269,8 @@ class MainWindow(QMainWindow):
         
     def _save_current_data_to_model(self):
         self.model.update_data("original_text", self.narrative_text_edit.toPlainText())
-        self.model.update_data("min_phrase_words", self.min_words_spinbox.value()) # REFACTORED
-        self.model.update_data("max_phrase_words", self.max_words_spinbox.value()) # REFACTORED
+        self.model.update_data("min_phrase_words", self.min_words_spinbox.value())
+        self.model.update_data("max_phrase_words", self.max_words_spinbox.value())
     
     def update_process_button_state(self):
         text = self.narrative_text_edit.toPlainText()

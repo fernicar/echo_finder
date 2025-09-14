@@ -92,7 +92,7 @@ class EchoFinderWorker(QRunnable):
                 results.append({
                     "phrase": phrase,
                     "count": len(occurrences),
-                    "words": len(phrase.split()), # REFACTORED: 'length' -> 'words'
+                    "words": len(phrase.split()),
                     "occurrences": occurrences,
                 })
 
@@ -128,7 +128,7 @@ class ProjectModel(QObject):
     status_message = Signal(str)
     echo_results_updated = Signal(list)
     whitelist_updated = Signal(list)
-    max_words_available = Signal(int) # REFACTORED: Renamed signal
+    max_words_available = Signal(int)
 
     def __init__(self):
         super().__init__()
@@ -142,8 +142,8 @@ class ProjectModel(QObject):
         self.data = {
             "project_name": "Unnamed Project",
             "original_text": "",
-            "min_phrase_words": 2, # REFACTORED
-            "max_phrase_words": 8, # REFACTORED
+            "min_phrase_words": 2,
+            "max_phrase_words": 8,
             "custom_whitelist": ["Dr.", "Mr.", "Mrs.", "St.", "e.g.", "i.e."],
             "last_used_sort_preset": "most_repeated_short_to_long",
             "echo_results": []
@@ -181,14 +181,14 @@ class ProjectModel(QObject):
     @Slot()
     def process_text(self):
         text = self.data.get("original_text", "")
-        min_words = self.data.get("min_phrase_words", 2) # REFACTORED
-        max_words = self.data.get("max_phrase_words", 8) # REFACTORED
+        min_words = self.data.get("min_phrase_words", 2)
+        max_words = self.data.get("max_phrase_words", 8)
         whitelist = self.data.get("custom_whitelist", [])
         
         worker = EchoFinderWorker(text, min_words, max_words, whitelist)
         worker.signals.result.connect(self._on_processing_result)
         worker.signals.status.connect(self.status_message)
-        worker.signals.max_words_available.connect(self.max_words_available) # REFACTORED
+        worker.signals.max_words_available.connect(self.max_words_available)
         worker.signals.error.connect(lambda e: self.status_message.emit(f"Processing Error: {e[2]}"))
         
         self.threadpool.start(worker)
@@ -204,9 +204,9 @@ class ProjectModel(QObject):
         results = self.data.get("echo_results", [])
         
         if preset == "most_repeated_short_to_long":
-            results.sort(key=lambda x: (-x['count'], x['words'], x['phrase'])) # REFACTORED
+            results.sort(key=lambda x: (-x['count'], x['words'], x['phrase']))
         elif preset == "longest_first_by_word_count":
-            results.sort(key=lambda x: (-x['words'], x['count'], x['phrase'])) # REFACTORED
+            results.sort(key=lambda x: (-x['words'], x['count'], x['phrase']))
             
         self.echo_results_updated.emit(results)
     
