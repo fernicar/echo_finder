@@ -1,22 +1,26 @@
+# echo_finder_TINS_Edition
+
 ## Description
-`echo_finder_TINS_Edition` is a minimalist desktop application designed to identify and highlight redundant or excessively repeated phrases ("echoes") within narrative text. It helps users refine their writing by pinpointing repetitive phrasing, focusing on the "longest possible repeating sequences" to provide actionable insights for intervention. The application prioritizes clear identification over real-time editing, allowing users to analyze text and then make informed decisions to improve narrative flow.
+`echo_finder_TINS_Edition` is a sophisticated desktop application designed to identify and highlight redundant or excessively repeated phrases ("echoes") within narrative text. It helps users refine their writing by pinpointing repetitive phrasing, focusing on the "longest possible repeating sequences" to provide actionable insights. The application features a live, interactive highlighting system that updates in real-time as the user edits, providing an intuitive and powerful curation experience. It also includes persistent user preferences for UI theme, appearance, and sorting, ensuring a personalized workflow.
 
 ## Functionality
 
 ### Core Features
 -   **Text Input:** Load text from a project file or paste/type directly into a dedicated text area.
 -   **Echo Detection:** Process the narrative text to find repeating sequences of words (phrases).
--   **Dynamic Phrase Lengths:** Analyze phrases with a minimum length of 2 words, up to a dynamically determined maximum length based on the input text.
+-   **Configurable Word Count:** Analyze phrases with a user-configurable minimum and maximum number of words. The maximum is dynamically limited by the longest available phrase in the text.
 -   **"Maximal Match" (Greedy) Logic:** Prioritize and report only the longest possible repeating phrases, automatically filtering out shorter, overlapping repetitions that are fully contained within a reported longer echo.
--   **Custom Whitelist:** Allow users to define a project-specific whitelist of abbreviations (e.g., "Dr.", "Mr.") whose internal punctuation should be preserved during text preprocessing.
--   **Echo Results Display:** Present detected echoes in a sortable list, showing the phrase, its count, and its word length.
--   **Sorting Presets:** Offer two predefined sorting methods for the echo results: "Most Repeated (Short to Long)" and "Longest First (by Word Count)".
--   **Project Management:** Create new projects, load existing `.json` project files, and save the current text, configurations, whitelist, and echo results to `.json` files.
--   **UI Feedback:** Provide clear visual indicators for dirty text (needs re-processing) and status messages.
+-   **Live Interactive Highlighting:** Select a phrase from the results list or type into a dedicated toolbar field to see all occurrences instantly highlighted. The highlights and result counts update in real-time as the main text is edited.
+-   **Persistent UI Customization:** Choose between Light, Dark, or Auto (system) themes, and select from available UI styles (e.g., Fusion, Windows). Preferences are saved and automatically applied on next launch.
+-   **Persistent Sorting Presets:** Offer two predefined sorting methods: "Longest First (by Word Count)" and "Most Repeated (Short to Long)". The application defaults to "Longest First" and remembers the user's last choice across sessions.
+-   **Custom Whitelist:** Define a project-specific whitelist of abbreviations (e.g., "Dr.", "Mr.") whose internal punctuation should be preserved during text preprocessing.
+-   **Seamless Clipboard Integration:** An "Auto Copy" feature, enabled by default, instantly copies any selected phrase from the results list to the system clipboard for use in external editors.
+-   **Project Management:** Create, load, and save projects as `.json` files, preserving the text, configurations, whitelist, and analysis results.
+-   **Robust UI Feedback:** Provide clear visual indicators for a "dirty" state (when inputs no longer match the last analysis) and detailed status messages.
 
-### User Interface (PySide6 - Fusion Style, Auto Color Scheme)
+### User Interface (PySide6)
 
-The main application window will be a PySide6 desktop application using the 'Fusion' style and 'Auto' color scheme. It will feature a central layout divided into four main sections by `QSplitter` widgets, allowing dynamic resizing.
+The main application window is a PySide6 desktop application that respects persistent user settings for style and theme. It features a central layout divided into four main sections by `QSplitter` widgets, allowing dynamic resizing.
 
 ```mermaid
 graph TD
@@ -33,63 +37,59 @@ graph TD
 
 #### Menu Bar
 -   **File:**
-    -   `New (Ctrl+N)`: Clears UI, resets configuration to defaults, initializes a new empty project.
+    -   `New (Ctrl+N)`: Initializes a new empty project.
     -   `Open (Ctrl+O)`: Opens a `QFileDialog` to select a `.json` project file.
-    -   `Save (Ctrl+S)`: Saves current project state. If `unnamed`, prompts for "Save As".
+    -   `Save (Ctrl+S)`: Saves current project state.
     -   `Save As (Ctrl+Shift+S)`: Opens `QFileDialog` to save project to a new `.json` file.
     -   `Exit (Ctrl+Q)`: Closes the application.
 -   **Edit:**
     -   `Paste from Clipboard (Ctrl+V)`: Pastes system clipboard content into `Narrative Text Area`.
+    -   `Auto Copy Phrase to Clipboard`: A checkable action, enabled by default.
+    -   `Appearance`: A sub-menu with a checkable, exclusive group of actions for all available system styles (e.g., Fusion, Windows).
+    -   `Theme`: A sub-menu with a checkable, exclusive group of actions for `Auto`, `Light`, and `Dark` themes.
 -   **Help:**
-    -   `About`: Displays a `QMessageBox` with "echo_finder_TINS_Edition", "License: MIT", "Copyright: fernicar", "Repository: [link to fernicar/echo_finder_TINS_Edition]".
+    -   `About`: Displays a `QMessageBox` with application details, license, and repository link.
 
 #### Narrative Text Area (`QTextEdit`)
 -   A large, multi-line `QTextEdit` widget for displaying and editing the narrative text.
--   It will be read-write, allowing direct input.
--   **Dirty Indicator:** Displays a visual cue (e.g., a red border or text label) when the text content (or `min/max_length`, or whitelist) changes, indicating the need for re-processing. This indicator clears after `Find Them` is successfully executed.
--   *Highlighting feature is planned for a future iteration.*
+-   **Dirty Indicator:** Displays a red border when the current inputs (text, word counts, whitelist) do not match the state of the last successful analysis.
+-   **Live Highlighting:** Dynamically highlights all occurrences of a selected phrase, using a theme-aware color (`QPalette.Highlight`).
 
 #### Echo Results List (`QTableWidget`)
 -   Displays processed echo phrases.
--   Columns: `Phrase` (string), `Count` (integer), `Length` (integer - number of words).
--   Populated and updated after text processing or sorting.
+-   Columns: `Count` (integer), `Words` (integer), `Phrase` (string).
+-   The `Count` column updates live as the user edits the main text while a phrase is highlighted.
 
 #### Whitelist Area (`QListWidget` with Controls)
--   `QListWidget` displaying current project's custom abbreviations.
--   Accompanying buttons for `Add`, `Edit`, `Remove` whitelist entries.
-    -   `Add`: Uses a `QInputDialog` to get new abbreviation.
-    -   `Edit`: Allows inline editing or uses `QInputDialog` to modify selected entry.
-    -   `Remove`: Deletes selected entry.
+-   `QListWidget` displaying the current project's custom abbreviations.
+-   Accompanying buttons for `Add` and `Remove` whitelist entries.
 
 #### Status Bar (`QStatusBar`)
--   Displays real-time messages: "Ready", "Processing...", "Project saved: [filename]", "No echoes found for current parameters", "Error: [message]".
--   Provides feedback on file operations and processing status.
+-   Displays real-time messages: "Ready", "Processing...", "Project saved", "Copied to clipboard", etc.
 
 #### Toolbar (`QToolBar`)
 -   **Controls:**
-    -   `Min Length:` (`QLabel` displaying "2" - read-only).
-    -   `Max Length:` (`QSpinBox`, default 8). Its `maximum` property is dynamically set by `model.py` based on the longest possible phrase in the current text (after preprocessing). If the current value exceeds the new maximum, it clamps to the new maximum.
-    -   `Find Them / Find Again` (`QPushButton`): Triggers text processing in `model.py`.
-    -   `Separator`
-    -   `Preset:` (`QComboBox`):
-        -   Option 1: "Most Repeated (Short to Long)"
-        -   Option 2: "Longest First (by Word Count)"
+    -   `Min Words:` (`QSpinBox`, configurable).
+    -   `Max Words:` (`QSpinBox`, configurable, with its maximum value dynamically set).
+    -   `Find Them / Find Again` (`QPushButton`).
+    -   `Preset:` (`QComboBox` with "Longest First" and "Most Repeated" options).
+    -   `Highlight:` (`QLineEdit`): An editable field that receives the selected phrase or accepts manual input for ad-hoc live searching.
 
-### Behavior Specifications (UI to Model Interaction)
+### Behavior Specifications
 
 -   **Processing Trigger:** The `Find Them / Find Again` button explicitly calls `model.py`'s `process_text()` method.
--   **Dirty State:** Any change in `Narrative Text Area` text, `max_phrase_length` `QSpinBox` value, or `Whitelist Area` content will set the UI's dirty indicator.
--   **Model-to-UI Updates:** `model.py` uses PySide6 signals (e.g., `echo_results_updated`, `status_message`, `project_loaded`, `whitelist_updated`) to inform `main.py` of processing completion, status changes, and data updates. `main.py` connects its slots to these signals to refresh the UI.
--   **Project Loading:** `model.py` emits a `project_loaded` signal, which `main.py` uses to populate all UI elements (text area, spin boxes, whitelist, results table, preset dropdown) with the loaded data.
--   **Sorting Interaction:** Selecting a `Preset` from the `QComboBox` calls `model.py`'s `sort_results()` method. `model.py` then emits `echo_results_updated` with the newly sorted list, which `main.py` uses to refresh the `QTableWidget`. This does not trigger a full text re-processing.
+-   **Dirty State Logic (State Snapshotting):** After a successful analysis, a snapshot of the inputs (text, word counts, whitelist) is taken. The state is considered "dirty" if the current inputs no longer match this snapshot. This comparison is checked whenever a relevant input changes.
+-   **Live Highlighting Behavior:** User interaction (clicking the results table or typing in the highlight field) triggers a 250ms debounce `QTimer`. When the timer finishes, a live search is performed on the main text, applying theme-aware highlights and updating the result counts. Editing the main text also re-triggers this process.
+-   **Persistent Settings (`QSettings`):** The application uses `QSettings` to store and load the user's preferred GUI style, theme, and default sort preset. These are applied at startup. The sort preset is saved the moment it's changed.
+-   **Project Loading:** Loading a project restores its specific state. A new project inherits the user's persistent global preferences.
+-   **Model-to-UI Updates:** `model.py` uses PySide6 signals (e.g., `echo_results_updated`, `project_loaded`) to communicate with `main.py`, which updates the UI via connected slots.
 
 ## Technical Implementation
 
 ### Architecture
-The application will adhere to a clear separation of concerns:
--   **`model.py`**: Encapsulates all application logic, data handling, text processing, echo detection, project management, and sorting. It will be a `QObject` to emit signals.
--   **`main.py`**: Manages the graphical user interface, user interactions, and acts as the view/controller. It listens to `model.py`'s signals and calls its methods in response to UI events.
--   **Threading**: Long-running operations within `model.py` (specifically `process_text()`) must be executed in a separate `QThread` to prevent the `main.py` GUI from freezing, ensuring responsiveness and allowing status updates.
+-   **`model.py`**: A `QObject` encapsulating all application logic: data handling, text processing, echo detection, project management, and sorting.
+-   **`main.py`**: The `QMainWindow` that manages the GUI, user interactions, and persistent settings via `QSettings`. It acts as the view/controller.
+-   **Threading**: Long-running operations in `model.py` (specifically `process_text()`) must run in a separate `QThread` to keep the GUI responsive.
 
 ### Data Model
 
@@ -97,11 +97,11 @@ The application will adhere to a clear separation of concerns:
 ```json
 {
   "project_name": "My Narrative Analysis",
-  "original_text": "The turtle started running and then it crouch... The turtle started running and then it smiled...",
-  "min_phrase_length": 2,
-  "max_phrase_length": 8,
+  "original_text": "The turtle started running and then it smiled...",
+  "min_phrase_words": 2,
+  "max_phrase_words": 8,
   "custom_whitelist": ["Dr.", "Mr.", "Mrs.", "St.", "e.g.", "i.e."],
-  "last_used_sort_preset": "most_repeated_short_to_long",
+  "last_used_sort_preset": "longest_first_by_word_count",
   "echo_results": []
 }
 ```
@@ -109,121 +109,89 @@ The application will adhere to a clear separation of concerns:
 #### Echo Phrase Object Structure (within `echo_results` list)
 ```json
 {
-  "phrase": "the turtle started running and then it smiled", // The normalized echo phrase (lowercase, punctuation stripped)
-  "count": 2,                                               // Number of occurrences
-  "length": 8,                                              // Number of words in the phrase
-  "occurrences": [                                          // List of original occurrences for highlighting (character indices)
+  "phrase": "the turtle started running and then it smiled",
+  "count": 2,
+  "words": 8,
+  "occurrences": [
     {"start": 0, "end": 45},
     {"start": 50, "end": 95}
   ]
 }
 ```
 
-### Algorithms (in `model.py`)
+### Algorithms
 
 1.  **Text Preprocessing:**
-    *   Convert input `original_text` to lowercase.
-    *   Tokenize the text into a list of words.
-    *   **Punctuation Stripping with Whitelist:** Iterate through words. For each word, remove common punctuation (`,`, `.`, `?`, `!`, `;`, `:`, `(`, `)`, etc.) unless the word (or a significant part of it) matches an entry in the `custom_whitelist` (e.g., "Dr." should remain "Dr."). During this, meticulously track the original `start` and `end` character indices for each processed word token relative to the `original_text`.
-    *   **Maximal Phrase Length Calculation:** After preprocessing, determine the maximum number of words in any contiguous sequence that can form a phrase, to set the dynamic `max_phrase_length` for the UI's `QSpinBox`.
+    *   Convert `original_text` to lowercase.
+    *   Tokenize into a list of words, meticulously tracking original character indices for each token.
+    *   Strip common punctuation unless a word matches an entry in the `custom_whitelist`.
+    *   Calculate the maximum possible phrase length to update the UI's `Max Words` spin box limit.
 
 2.  **N-gram Generation & Frequency Counting:**
-    *   Using the preprocessed word tokens and their original index mappings, generate all possible contiguous phrases (n-grams) from `min_phrase_length` (fixed at 2) up to the user-selected `max_phrase_length`.
-    *   For each generated n-gram:
-        *   Store it in a hash map (Python dictionary) where the key is the phrase string and the value is an object containing `count`, `length`, and a list of `occurrences` (e.g., `{"start": ..., "end": ...}` character index tuples from the *original* text).
-        *   Increment `count` if the phrase already exists. Add new phrase if not.
+    *   Generate all contiguous phrases (n-grams) within the user-selected `min_phrase_words` and `max_phrase_words` range.
+    *   Store each unique phrase in a hash map, aggregating its `count`, `words`, and a list of all `occurrences` (character index tuples).
 
 3.  **"Maximal Match" (Greedy) Filtering:**
-    *   After generating all n-grams and their counts, iterate through the detected echoes (`count >= 2`).
-    *   Implement logic to ensure that if a longer phrase `P_long` is an echo, and a shorter phrase `P_short` is also an echo, where `P_short` is a direct substring of `P_long` AND `P_short`'s occurrences are entirely contained within (or identical to the start/end bounds of) `P_long`'s occurrences, then only `P_long` should be included in the final `echo_results`. This ensures that only the most extensive, non-redundant repeating sequences are reported.
+    *   After counting, filter the results to ensure that if a longer echo `P_long` is reported, no shorter echo that is a substring of `P_long` and whose occurrences are fully contained within `P_long`'s occurrences is also reported.
 
-4.  **Sorting Algorithms:**
-    *   **Preset 1: "Most Repeated (Short to Long)"**: Sort `echo_results` primarily by `count` (descending), then by `length` (ascending), then alphabetically by `phrase`.
-    *   **Preset 2: "Longest First (by Word Count)"**: Sort `echo_results` primarily by `length` (descending), then by `count` (ascending), then alphabetically by `phrase`.
+4.  **Live Highlighting Logic:**
+    *   This logic resides in `main.py`. It clears all existing text formats. It then uses `QTextDocument.find()` in a loop to find all occurrences of the search string (case-insensitively). For each match, it applies a `QTextCharFormat` with a background color from `QApplication.palette().color(QPalette.ColorRole.Highlight)`.
+
+5.  **State Snapshotting Logic:**
+    *   A tuple containing the full narrative text, min/max word values, and a sorted tuple of whitelist items is created and stored after a successful analysis. The dirty check involves creating a new snapshot of the current inputs and comparing it to the stored one.
 
 ### Dependencies
 -   **PySide6** (version >= 6.9.1)
--   Standard Python libraries (e.g., `json`, `re` for regex in preprocessing if needed).
--   No other third-party libraries or external APIs are required for the application's runtime.
+-   Standard Python libraries.
 
 ## Input/Output
 
 ### Input Specifications
--   **Text Input:** Raw text (string) via `QTextEdit` or loaded from a `.json` file.
--   **`max_phrase_length`:** Integer (2 to dynamic max, default 8).
+-   **Text Input:** Raw text (string).
+-   **`min_phrase_words` / `max_phrase_words`:** Integers.
 -   **`custom_whitelist` entries:** List of strings.
--   **Sorting Preset Selection:** String ("most_repeated_short_to_long", "longest_first_by_word_count").
--   **Project File Path:** String (path to `.json` file).
+-   **Sorting Preset Selection:** String ("longest_first_by_word_count", "most_repeated_short_to_long").
+-   **Highlight Search:** String from the `Highlight` toolbar field.
+-   **GUI Preferences:** Style name (string) and Theme ID (integer).
 
 ### Output Specifications
--   **`echo_results` Display:** `QTableWidget` rows: `Phrase` (string), `Count` (integer), `Length` (integer).
--   **Status Messages:** `QStatusBar` (string messages).
--   **Project Files:** `.json` files containing the specified project data structure.
--   **Whitelist Display:** `QListWidget` displaying current `custom_whitelist` entries.
+-   **`echo_results` Display:** `QTableWidget` rows: `Count`, `Words`, `Phrase`.
+-   **Status Messages:** `QStatusBar` messages.
+-   **Project Files:** `.json` files.
 
 ## Error Handling and Validation
 
--   **File Errors:** `model.py` will catch file I/O errors (e.g., `FileNotFoundError`, `PermissionError`, `json.JSONDecodeError`) during load/save operations and emit `status_message` signals. `main.py` will display these in the `QStatusBar` and potentially as `QMessageBox.warning` for critical failures.
--   **Empty Narrative Text:** The `Find Them / Find Again` button will be disabled if the `Narrative Text Area` is empty or if the preprocessed text contains fewer than 2 words.
--   **Empty Whitelist Entry:** Adding an empty or whitespace-only string to the `custom_whitelist` will be prevented, with a `QMessageBox.warning` shown to the user.
--   **No Echoes Found:** If `process_text` returns an empty `echo_results` list, the `QStatusBar` will display "No echoes found for current parameters."
--   **`max_phrase_length` Validation:** The `QSpinBox` will dynamically adjust its maximum value and clamp its current value if it exceeds the new maximum, preventing invalid ranges.
--   **UI Feedback:** All user actions and model responses will trigger appropriate status bar messages or visual indicators (like the "red line").
+-   **File Errors:** `model.py` will catch file I/O and JSON parsing errors and report them via status messages.
+-   **Empty/Insufficient Text:** The `Find Them / Find Again` button is disabled if the text is empty or has fewer words than the selected `Min Words` setting.
+-   **Empty Whitelist Entry:** User is prevented from adding an empty string to the whitelist.
+-   **No Echoes Found:** An informative message is displayed in the status bar.
+-   **Robust Dirty State:** The state snapshotting method ensures the red border indicator is accurate and not prone to race conditions from programmatic UI updates.
 
 ## Technical Constraints & Notes
 
--   **Text Volume:** The application should handle text up to the approximate length of 6 typical book chapters efficiently.
--   **Responsiveness:** While processing can take time for large texts, the UI must remain responsive. Heavy computational tasks in `model.py` (especially `process_text`) must run in a separate thread.
--   **Memory:** Standard Python data structures are acceptable; no extreme memory optimizations are necessary given typical text sizes (up to 6 chapters) and a system with 16GB RAM.
--   **Platform:** The primary target platform is Windows 10.
--   **Python-only:** No external APIs or AI/LLM models should be used *within the generated application's runtime*. The LLM will use its capabilities *to generate* the code.
+-   **Text Volume:** Should handle text equivalent to ~6 book chapters.
+-   **Responsiveness:** Long-running text processing must be offloaded to a `QThread` to keep the UI responsive. Live highlighting must be performant.
+-   **Platform:** Primary target platform is Windows 10, but should be cross-platform compatible.
+-   **Python-only:** No external APIs or runtime AI/LLM models are used.
 
 ## Acceptance Criteria
 
-The generated `echo_finder_TINS_Edition` application will be verified against the following test cases:
+1.  **Core Echo Detection & Maximal Match Logic:**
+    *   Given the test text `"The turtle started running and then it smiled and then the turtle started running and then it smiled..."`, the application correctly identifies ` "the turtle started running and then it smiled"` as the sole maximal match with a count of 2 and hides all shorter, contained echoes.
 
-1.  **Core Echo Detection & Maximal Match (Greedy) Logic:**
-    *   **Test Case 1 (User Provided - Maximal Match):**
-        *   **Input Text:** "The turtle started running and then it smiled and then the turtle started running and then it smiled, while at the same the turtle started running and then it crouched down."
-        *   **Expected `echo_results` (after `process_text`, default `min_len=2`, dynamic `max_len`, default whitelist `["Dr.", "Mr.", "Mrs.", "St.", "e.g.", "i.e."]`):**
-            ```json
-            [
-              {
-                "phrase": "the turtle started running and then it smiled",
-                "count": 2,
-                "length": 8,
-                "occurrences": [
-                  {"start": 0, "end": 45}, // LLM to calculate precise indices
-                  {"start": 50, "end": 95}
-                ]
-              }
-            ]
-            ```
-        *   **Verification:** The `Echo Results List` in the GUI must display exactly one entry: "the turtle started running and then it smiled", with a count of 2 and length 8. No shorter, overlapping echoes (e.g., "the turtle started running and then it") should be reported.
-    *   **Test Case 2 (No Echoes):**
-        *   **Input Text:** "This is a unique sentence. It has no repetitions at all."
-        *   **Expected `echo_results`:** An empty list.
-        *   **Verification:** The `Echo Results List` is empty, and the `QStatusBar` displays "No echoes found for current parameters."
-    *   **Test Case 3 (Punctuation and Whitelist):**
-        *   **Input Text:** "Dr. Smith said, 'Hello Mr. Jones.' Then Dr. Smith asked, 'Is Mr. Jones here?'"
-        *   **Custom Whitelist:** Add `["Dr.", "Mr."]` via the UI.
-        *   **Verification:** After processing, confirm that `Dr.` and `Mr.` are preserved and `Dr. Smith` and `Mr. Jones` (or similar normalized forms depending on trailing punctuation) are correctly identified as repeating phrases if their counts are >= 2. For instance, "dr. smith" should be treated as a single token for phrase formation and matching.
+2.  **Live Highlighting and Count Update:**
+    *   Clicking a result row highlights all occurrences of its phrase in the main text.
+    *   Typing in the highlight field also triggers highlighting.
+    *   Editing the main text causes highlights to update their positions correctly in real-time.
+    *   Deleting a highlighted phrase in the text updates the `Count` in the results table for that phrase.
+    *   Clearing the highlight field removes all highlights.
 
-2.  **Configuration Handling:**
-    *   **Dynamic `max_phrase_length`:** When new text is loaded/pasted, the `max_phrase_length` `QSpinBox`'s `maximum` value updates correctly to the longest possible word sequence in the text.
-    *   **Processing with New Config:** Changing the `max_phrase_length` and clicking `Find Them / Find Again` correctly re-processes the text and updates results.
-    *   **Whitelist Management:** Adding/removing whitelist entries updates the `QListWidget`, changes the "dirty" state, and affects subsequent processing correctly.
+3.  **Persistent Settings:**
+    *   Changing the theme to `Dark`, closing, and re-opening the application launches it in `Dark` theme.
+    *   Changing the sort preset to `Most Repeated`, closing, and re-opening the application starts a new project with that preset selected.
 
-3.  **Project Persistence:**
-    *   Saving a project to a `.json` file and then re-loading it restores all UI states (`Narrative Text Area` content, `max_phrase_length`, `custom_whitelist`, `echo_results`, `last_used_sort_preset`) precisely.
+4.  **Robust Dirty State:**
+    *   Clicking `Find Them / Find Again` removes the red border. The border does not reappear until the user makes a meaningful change to the text, word count settings, or whitelist.
 
-4.  **User Interface Responsiveness & Feedback:**
-    *   The `Find Them / Find Again` button is disabled when the `Narrative Text Area` is empty or has insufficient words for processing.
-    *   The "red line" dirty indicator appears/disappears as specified.
-    *   `QStatusBar` messages accurately reflect application status (e.g., "Processing...", "Project saved", "No echoes found.").
-
-5.  **Sorting Presets:**
-    *   With `echo_results` present, switching between "Most Repeated (Short to Long)" and "Longest First (by Word Count)" in the `Preset` dropdown re-sorts the `QTableWidget` display immediately without re-processing.
-
-6.  **Threading:**
-    *   During `process_text` execution, the UI remains responsive, and the `QStatusBar` can update with "Processing...".
+5.  **UI Customization:**
+    *   Selecting a new `Appearance` style or `Theme` from the `Edit` menu instantly updates the application's look and feel.
