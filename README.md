@@ -2,8 +2,11 @@
 
 A smart tool for writers to find and eliminate repetitive phrases (echoes) in their text.
 
+![app_capture0](images/app_capture0.png)
 
-*The echo_finder application analyzing text and displaying results.*
+<video src="video/demo.mp4" controls width="1024">
+  Your browser does not support the video tag.
+</video>
 
 ## About The Project
 
@@ -14,11 +17,13 @@ The core of `echo_finder` is its "Maximal Match" logic. Instead of overwhelming 
 ### Key Features
 
 -   **Maximal Match Logic**: Intelligently finds the longest repeating phrases ("greedy" matching) and hides shorter, overlapping echoes to reduce noise.
+-   **Live Interactive Highlighting**: Click a result to see all its occurrences instantly highlighted. Edit your text and watch the highlights update in real-time, just like in a modern code editor. The live count in the results list shows your progress as you eliminate echoes.
+-   **Customizable Appearance & Themes**: Tailor the look and feel of the application. Choose between Light, Dark, or Auto (system) themes, and select from available UI styles like Fusion or Windows. Your preferences are saved for your next session.
+-   **Persistent Sorting Presets**: Organize results by frequency or word count. Your preference is saved and remembered for your next session.
 -   **Configurable Word Count**: Set a minimum and maximum number of words for a phrase to be considered an echo, giving you full control over the analysis.
 -   **Custom Whitelist**: Preserve the integrity of abbreviations and proper nouns (e.g., "Dr.", "Mr. Jones") by adding them to a project-specific whitelist.
--   **Sorting Presets**: Organize the results to focus on what matters most to you—either the most frequently repeated phrases or the longest ones.
+-   **Seamless Clipboard Integration**: By default, clicking a found phrase instantly copies it to your clipboard, enabling a rapid workflow with your favorite external text editor.
 -   **Project Management**: Save your text, configurations, and results into a simple `.json` file to resume your work at any time.
--   **Clipboard Integration**: Instantly copy any found phrase to your clipboard with a single click for easy searching and editing in your primary writing tool.
 
 ### Built With
 
@@ -70,8 +75,15 @@ Follow these steps to get `echo_finder` running on your local machine.
 1.  **Input Text**: Paste your text directly into the top panel, or open a previously saved `.json` project file via `File > Open`.
 2.  **Configure Parameters**: Use the toolbar to set the `Min Words` and `Max Words` for the phrase search.
 3.  **Find Echoes**: Click the `Find Them / Find Again` button to start the analysis. The UI will remain responsive while the processing happens in the background.
-4.  **Review Results**: The results will appear in the middle panel, sorted by your chosen preset. By default, clicking on a phrase in the results list will automatically copy it to your clipboard.
-5.  **Manage Whitelist**: Add or remove terms from the whitelist in the bottom panel to improve the accuracy of the analysis for your specific text.
+4.  **Review and Curate**: Once you have a list of echoes, you can begin curating your text using one of two primary workflows:
+
+    *   **Workflow 1: In-App Curation**
+        Click any phrase in the results list. All instances of that phrase will be highlighted in the text editor above. The phrase also appears in the "Highlight" toolbar field. You can now edit the main text, and the highlights and the "Count" in the results list will update live, showing you your progress as you eliminate echoes.
+
+    *   **Workflow 2: Curation in Your Favorite Editor**
+        By default, "Auto Copy" is enabled (`Edit > Auto Copy...`). Simply click any phrase in the results list to copy it to your clipboard. Switch to your preferred text editor (like VS Code, Sublime Text, etc.), press `Ctrl+F` to open the find dialog, and `Ctrl+V` to paste the phrase. You can then use your editor's powerful search and replace tools to curate the echoes.
+
+5.  **Customize the UI**: Go to `Edit > Appearance` or `Edit > Theme` to change the application's look and feel. Your choices are saved automatically and will be used the next time you launch the app.
 6.  **Save Your Work**: Use `File > Save` or `Save As` to store your session in a `.json` file.
 
 ## License
