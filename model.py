@@ -1,138 +1,143 @@
 # model.py
-import json
 import re
-from collections import defaultdict
-from pathlib import Path
-
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
-
 class WorkerSignals(QObject):
-    """
-    Defines the signals available from a running worker thread.
-    """
+    """Defines the signals available from a running worker thread."""
     finished = Signal()
     error = Signal(tuple)
     result = Signal(list)
-    status = Signal(str)
+    progress = Signal(str)
     max_words_available = Signal(int)
 
-
 class EchoFinderWorker(QRunnable):
-    """
-    Worker thread for finding echoes. Inherits from QRunnable to handle
-    worker thread setup, signals, and wrap the heavy processing.
-    """
-    def __init__(self, text, min_words, max_words, whitelist):
+    """Worker thread for finding echoes in text."""
+    def __init__(self, text, min_words, max_words, whitelist, strip_punctuation):
         super().__init__()
-        self.signals = WorkerSignals()
         self.text = text
         self.min_words = min_words
         self.max_words = max_words
-        self.whitelist = set(item.lower() for item in whitelist)
+        self.whitelist = whitelist
+        self.strip_punctuation = strip_punctuation
+        self.signals = WorkerSignals()
 
     @Slot()
     def run(self):
         try:
-            self.signals.status.emit("Processing: Normalizing text...")
+            # 1. Tokenization
+            self.signals.progress.emit("Step 1/4: Tokenizing text...")
             
-            processed_tokens = self._preprocess_text()
-
-            if not processed_tokens:
-                self.signals.result.emit([])
-                self.signals.status.emit("No processable words found in text.")
-                return
-
-            max_available_words = len(processed_tokens)
-            self.signals.max_words_available.emit(max_available_words)
+            # Build a regex that prioritizes whitelisted words
+            # This ensures "Dr." is matched before a general word match might just find "Dr"
+            escaped_whitelist = [re.escape(w) for w in self.whitelist]
+            # Sort by length descending to match longer entries first (e.g., "i.e." before "i.")
+            escaped_whitelist.sort(key=len, reverse=True)
             
-            if len(processed_tokens) < self.min_words:
-                self.signals.result.emit([])
-                self.signals.status.emit("Not enough words to find echoes.")
-                return
-
-            self.signals.status.emit(f"Processing: Finding phrases ({self.min_words}-{self.max_words} words)...")
+            # The general pattern for words
+            general_word_pattern = r'\b[a-zA-Z0-9\'’`]+\b'
             
-            phrase_occurrences = defaultdict(list)
-            for n in range(self.min_words, min(self.max_words, max_available_words) + 1):
-                for i in range(len(processed_tokens) - n + 1):
-                    phrase_tokens = processed_tokens[i : i + n]
-                    phrase_str = " ".join(token['word'] for token in phrase_tokens)
+            # Combine them, prioritizing the whitelist
+            # The whitelist part captures case-sensitively
+            # The general part captures case-insensitively via re.IGNORECASE flag
+            patterns = escaped_whitelist + [general_word_pattern]
+            combined_pattern = re.compile("|".join(patterns))
+
+            tokens = []
+            max_words_in_sentence = 0
+            current_sentence_word_count = 0
+
+            if self.strip_punctuation:
+                for match in combined_pattern.finditer(self.text):
+                    word = match.group(0)
+                    start, end = match.span()
                     
-                    start_char = phrase_tokens[0]['start']
-                    end_char = phrase_tokens[-1]['end']
-                    
-                    phrase_occurrences[phrase_str].append({'start': start_char, 'end': end_char})
+                    # Only lowercase if it's NOT in the whitelist
+                    token_word = word if word in self.whitelist else word.lower()
+                    tokens.append({'word': token_word, 'start': start, 'end': end})
+            else: # Literal tokenization
+                for match in re.finditer(r'\S+', self.text):
+                    word = match.group(0)
+                    start, end = match.span()
+                    tokens.append({'word': word, 'start': start, 'end': end})
 
-            echoes = {
+            # Calculate max words for the UI spinbox
+            if tokens:
+                text_word_count = len(re.findall(r'\b\w+\b', self.text))
+                self.signals.max_words_available.emit(text_word_count)
+
+            # 2. N-gram Generation
+            self.signals.progress.emit("Step 2/4: Generating phrases...")
+            phrase_occurrences = {}
+            for n in range(self.min_words, self.max_words + 1):
+                if n > len(tokens): break
+                for i in range(len(tokens) - n + 1):
+                    phrase_tokens = tokens[i : i + n]
+                    phrase_text = " ".join(t['word'] for t in phrase_tokens)
+                    
+                    # The occurrence tracks the start of the first word and end of the last word
+                    occurrence = {'start': phrase_tokens[0]['start'], 'end': phrase_tokens[-1]['end']}
+                    
+                    if phrase_text not in phrase_occurrences:
+                        phrase_occurrences[phrase_text] = []
+                    phrase_occurrences[phrase_text].append(occurrence)
+
+            # 3. Frequency Filtering
+            self.signals.progress.emit("Step 3/4: Filtering frequent phrases...")
+            repeated_phrases = {
                 phrase: occurrences
                 for phrase, occurrences in phrase_occurrences.items()
                 if len(occurrences) >= 2
             }
 
-            self.signals.status.emit("Processing: Filtering for maximal matches...")
-            
-            sorted_echo_phrases = sorted(echoes.keys(), key=lambda p: len(p.split()), reverse=True)
+            # 4. Maximal Match Filtering
+            self.signals.progress.emit("Step 4/4: Finding maximal echoes...")
+            # Sort by word count descending, so we process longer phrases first
+            sorted_phrases = sorted(repeated_phrases.keys(), key=lambda p: len(p.split()), reverse=True)
             
             maximal_echoes = {}
-            for phrase in sorted_echo_phrases:
-                is_substring = False
-                for longer_phrase in maximal_echoes:
-                    if phrase in longer_phrase:
-                        is_substring = True
+            for phrase in sorted_phrases:
+                # Check if this phrase is a substring of an already-accepted longer phrase
+                is_subphrase = False
+                for existing_max_phrase in maximal_echoes:
+                    if phrase in existing_max_phrase:
+                        is_subphrase = True
                         break
-                
-                if not is_substring:
-                    maximal_echoes[phrase] = echoes[phrase]
-            
+                if not is_subphrase:
+                    maximal_echoes[phrase] = repeated_phrases[phrase]
+
+            # Build final result list
             results = []
             for phrase, occurrences in maximal_echoes.items():
+                first_occurrence = occurrences[0]
+                representative_original = self.text[first_occurrence['start']:first_occurrence['end']]
                 results.append({
-                    "phrase": phrase,
-                    "count": len(occurrences),
-                    "words": len(phrase.split()),
-                    "occurrences": occurrences,
+                    'phrase': phrase,
+                    'representative_original': representative_original,
+                    'count': len(occurrences),
+                    'words': len(phrase.split()),
+                    'occurrences': occurrences,
                 })
 
             self.signals.result.emit(results)
-            self.signals.status.emit(f"Processing complete. Found {len(results)} maximal echoes.")
-
         except Exception as e:
-            self.signals.error.emit((type(e), e, str(e)))
+            self.signals.error.emit((e, "Error during text processing."))
         finally:
             self.signals.finished.emit()
-
-    def _preprocess_text(self):
-        tokens = []
-        whitelist_pattern = "|".join(re.escape(item) for item in self.whitelist)
-        word_pattern = r'\b(?:' + whitelist_pattern + r'|[a-zA-Z0-9\'-]+)\b' if self.whitelist else r'\b[a-zA-Z0-9\'-]+\b'
-
-        for match in re.finditer(word_pattern, self.text, re.IGNORECASE):
-            word = match.group(0).lower()
-            if match.group(0) in self.whitelist:
-                 word = match.group(0)
-
-            tokens.append({
-                'word': word,
-                'start': match.start(),
-                'end': match.end()
-            })
-        return tokens
-
 
 class ProjectModel(QObject):
     """Manages the application's data and business logic."""
     project_loaded = Signal(dict)
-    status_message = Signal(str)
+    status_message = Signal(str, int)
     echo_results_updated = Signal(list)
     whitelist_updated = Signal(list)
     max_words_available = Signal(int)
 
     def __init__(self):
         super().__init__()
-        self.threadpool = QThreadPool()
-        self.current_project_path = None
         self.data = {}
+        self.current_project_path = None
+        self.threadpool = QThreadPool()
+        self.status_message.emit("Ready. Create a new project or open an existing one.", 0)
 
     def new_project(self, preferred_preset="longest_first_by_word_count"):
         self.current_project_path = None
@@ -141,81 +146,79 @@ class ProjectModel(QObject):
             "original_text": "",
             "min_phrase_words": 2,
             "max_phrase_words": 8,
+            "strip_punctuation": True,
             "custom_whitelist": ["Dr.", "Mr.", "Mrs.", "St.", "e.g.", "i.e."],
             "last_used_sort_preset": preferred_preset,
             "echo_results": []
         }
         self.project_loaded.emit(self.data)
-        self.status_message.emit("New project created. Paste text to begin.")
-
-    @Slot(str)
-    def load_project(self, filepath: str):
+        self.status_message.emit("New project created. Paste text to begin.", 4000)
+    
+    def load_project(self, filepath):
         try:
-            path = Path(filepath)
-            with path.open('r', encoding='utf-8') as f:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                import json
                 self.data = json.load(f)
-            self.current_project_path = path
-            self.project_loaded.emit(self.data)
-            self.status_message.emit(f"Project loaded: {path.name}")
+                self.current_project_path = filepath
+                self.project_loaded.emit(self.data)
+                self.status_message.emit(f"Project '{self.data.get('project_name', 'Unnamed')}' loaded.", 4000)
         except Exception as e:
-            self.status_message.emit(f"Error loading project: {e}")
+            self.status_message.emit(f"Error loading project: {e}", 5000)
 
-    @Slot(str)
-    def save_project(self, filepath: str):
+    def save_project(self, filepath):
         try:
-            path = Path(filepath)
-            with path.open('w', encoding='utf-8') as f:
+            self.data['project_name'] = self._extract_project_name(filepath)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                import json
                 json.dump(self.data, f, indent=2)
-            self.current_project_path = path
-            self.data['project_name'] = path.stem
-            self.status_message.emit(f"Project saved: {path.name}")
+                self.current_project_path = filepath
+                self.status_message.emit(f"Project saved to {filepath}", 4000)
         except Exception as e:
-            self.status_message.emit(f"Error saving project: {e}")
-            
+            self.status_message.emit(f"Error saving project: {e}", 5000)
+
+    def _extract_project_name(self, filepath):
+        from pathlib import Path
+        return Path(filepath).stem
+
+    def process_text(self):
+        worker = EchoFinderWorker(
+            text=self.data.get("original_text", ""),
+            min_words=self.data.get("min_phrase_words", 2),
+            max_words=self.data.get("max_phrase_words", 8),
+            whitelist=self.data.get("custom_whitelist", []),
+            strip_punctuation=self.data.get("strip_punctuation", True)
+        )
+        worker.signals.result.connect(self._on_processing_result)
+        worker.signals.progress.connect(lambda msg: self.status_message.emit(msg, 0))
+        worker.signals.finished.connect(lambda: self.status_message.emit("Processing complete.", 4000))
+        worker.signals.error.connect(lambda err: self.status_message.emit(f"Error: {err[1]}", 5000))
+        worker.signals.max_words_available.connect(self.max_words_available)
+        self.threadpool.start(worker)
+
+    def _on_processing_result(self, results):
+        self.data["echo_results"] = results
+        self.sort_results() # Apply current sort order to new results
+
+    def sort_results(self):
+        preset = self.data.get("last_used_sort_preset", "longest_first_by_word_count")
+        if preset == "longest_first_by_word_count":
+            self.data["echo_results"].sort(key=lambda x: (-x['words'], -x['count'], x['phrase']))
+        elif preset == "most_repeated_short_to_long":
+            self.data["echo_results"].sort(key=lambda x: (-x['count'], x['words'], x['phrase']))
+        
+        self.echo_results_updated.emit(self.data["echo_results"])
+
     def update_data(self, key, value):
         self.data[key] = value
 
-    @Slot()
-    def process_text(self):
-        text = self.data.get("original_text", "")
-        min_words = self.data.get("min_phrase_words", 2)
-        max_words = self.data.get("max_phrase_words", 8)
-        whitelist = self.data.get("custom_whitelist", [])
-        
-        worker = EchoFinderWorker(text, min_words, max_words, whitelist)
-        worker.signals.result.connect(self._on_processing_result)
-        worker.signals.status.connect(self.status_message)
-        worker.signals.max_words_available.connect(self.max_words_available)
-        worker.signals.error.connect(lambda e: self.status_message.emit(f"Processing Error: {e[2]}"))
-        
-        self.threadpool.start(worker)
-
-    @Slot(list)
-    def _on_processing_result(self, results):
-        self.data["echo_results"] = results
-        self.sort_results()
-
-    @Slot()
-    def sort_results(self):
-        preset = self.data.get("last_used_sort_preset", "longest_first_by_word_count")
-        results = self.data.get("echo_results", [])
-        
-        if preset == "most_repeated_short_to_long":
-            results.sort(key=lambda x: (-x['count'], x['words'], x['phrase']))
-        elif preset == "longest_first_by_word_count":
-            results.sort(key=lambda x: (-x['words'], x['count'], x['phrase']))
-            
-        self.echo_results_updated.emit(results)
-    
-    @Slot(str)
     def add_whitelist_entry(self, entry):
-        if entry and entry not in self.data["custom_whitelist"]:
+        if "custom_whitelist" not in self.data:
+            self.data["custom_whitelist"] = []
+        if entry not in self.data["custom_whitelist"]:
             self.data["custom_whitelist"].append(entry)
-            self.data["custom_whitelist"].sort()
             self.whitelist_updated.emit(self.data["custom_whitelist"])
-
-    @Slot(str)
+    
     def remove_whitelist_entry(self, entry):
-        if entry in self.data["custom_whitelist"]:
+        if "custom_whitelist" in self.data and entry in self.data["custom_whitelist"]:
             self.data["custom_whitelist"].remove(entry)
             self.whitelist_updated.emit(self.data["custom_whitelist"])
