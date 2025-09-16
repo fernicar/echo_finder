@@ -488,7 +488,7 @@ class MainWindow(QMainWindow):
         def get_hsl_color(hue, sat=saturation, lit=lightness):
             return f"hsl({hue}, {sat}%, {lit}%)"
 
-        def get_echo_occurrence_hsl_color(occurrence_index: int, total_occurrences: int, phrase_word_count: int, app_min_words_bound: int, app_max_words_bound: int):
+        def get_echo_occurrence_hsl_color(occurrence_index: int, total_occurrences: int, phrase_word_count: int):
             """
             Calculates a dynamic HSL color for an individual echo occurrence.
             Color shifts from purple (low repetition/first instance) to red (high repetition/later instance).
@@ -497,8 +497,6 @@ class MainWindow(QMainWindow):
             :param occurrence_index: 0-indexed position of this specific occurrence (0 for 1st, 1 for 2nd, etc.)
             :param total_occurrences: Total count of this phrase in the document.
             :param phrase_word_count: Number of words in the phrase.
-            :param app_min_words_bound: The current minimum word count set in the app's spinbox.
-            :param app_max_words_bound: The current maximum word count set in the app's spinbox.
             :return: An HSL color string.
             """
             if total_occurrences < 2:
@@ -507,31 +505,40 @@ class MainWindow(QMainWindow):
             # Normalize occurrence progress: 0.0 for first instance, 1.0 for last instance
             occurrence_progress = occurrence_index / (total_occurrences - 1) if total_occurrences > 1 else 0.0
 
-            # Calculate word impact factor (0.0 for min_words_bound, 1.0 for max_words_bound)
-            # This determines how "fast" the color shifts towards red.
-            word_range = max(1, app_max_words_bound - app_min_words_bound) # Prevent division by zero
-            word_impact_factor = (phrase_word_count - app_min_words_bound) / word_range
-            word_impact_factor = max(0.0, min(1.0, word_impact_factor)) # Clamp between 0 and 1
+            # --- ABSOLUTE COLOR CURVE LOGIC ---
+            # Define fixed word count points for the color curve
+            MIN_WORD_SEVERITY_THRESHOLD = 2
+            MAX_WORD_SEVERITY_THRESHOLD = 4
+            INSTANT_RED_WORD_THRESHOLD = 16
 
-            # Define the range of severity based on word count
-            # Longer phrases shift color more aggressively (closer to red)
-            COLOR_CHANGE_RATE_MIN_WORDS = 0.2  # Max severity for a 2-word phrase at its last instance
-            COLOR_CHANGE_RATE_MAX_WORDS = 0.8  # Max severity for an 8-word phrase at its last instance
+            max_severity_at_last_occurrence = 0.0 # Initialize
 
-            base_change_rate = COLOR_CHANGE_RATE_MIN_WORDS + (
-                (COLOR_CHANGE_RATE_MAX_WORDS - COLOR_CHANGE_RATE_MIN_WORDS) * word_impact_factor
-            )
+            if phrase_word_count >= INSTANT_RED_WORD_THRESHOLD:
+                # Phrases with 16 words or more are instantly red on any occurrence.
+                final_severity = 1.0
+            else:
+                if phrase_word_count <= MIN_WORD_SEVERITY_THRESHOLD:
+                    # 2-word phrases reach a maximum severity of 0.2 (blue hue) by their last occurrence.
+                    max_severity_at_last_occurrence = 0.2
+                elif phrase_word_count >= MAX_WORD_SEVERITY_THRESHOLD:
+                    # 4-word phrases reach a maximum severity of 1.0 (red hue) by their last occurrence.
+                    max_severity_at_last_occurrence = 1.0
+                else:
+                    # Linear interpolation for phrases between 2 and 4 words.
+                    # This scales the 'heating rate' between 0.2 and 1.0.
+                    normalized_word_count_in_range = (phrase_word_count - MIN_WORD_SEVERITY_THRESHOLD) / (MAX_WORD_SEVERITY_THRESHOLD - MIN_WORD_SEVERITY_THRESHOLD)
+                    max_severity_at_last_occurrence = 0.2 + (1.0 - 0.2) * normalized_word_count_in_range
 
-            final_severity = occurrence_progress * base_change_rate
-            final_severity = max(0.0, min(1.0, final_severity)) # Clamp final severity
+                # The actual severity for this occurrence is the progress * the max severity for this phrase length.
+                final_severity = occurrence_progress * max_severity_at_last_occurrence
 
-            # Map severity to hue (300 = Purple, 240 = Blue, 120 = Green, 60 = Yellow, 0 = Red)
+            final_severity = max(0.0, min(1.0, final_severity)) # Clamp final severity between 0 and 1
+
+            # Map severity (0.0 to 1.0) to hue (300 = Purple, 0 = Red)
+            # Hue decreases as severity increases.
             hue = 300 - (final_severity * 300)
             
             return get_hsl_color(hue)
-        
-        app_min_words_bound = self.min_words_spinbox.value()
-        app_max_words_bound = self.max_words_spinbox.value()
 
         for echo_item in echo_results:
             normalized_phrase = echo_item['phrase']
@@ -554,9 +561,7 @@ class MainWindow(QMainWindow):
                 color = get_echo_occurrence_hsl_color(
                     occurrence_index=occurrence_index,
                     total_occurrences=total_occurrences,
-                    phrase_word_count=phrase_word_count,
-                    app_min_words_bound=app_min_words_bound,
-                    app_max_words_bound=app_max_words_bound
+                    phrase_word_count=phrase_word_count
                 )
                 echo_spans.append((start, end, color))
 
