@@ -474,7 +474,7 @@ class MainWindow(QMainWindow):
         original_text = self.model.data.get("original_text", "")
         echo_results = self.model.data.get("echo_results", [])
 
-        # Prepare a list of (start, end, color) for all echo occurrences
+        # Prepare a list of (start, end, color) for all echo occurrences based on REGEX MATCHES
         echo_spans = []
         saturation = 75
         lightness = 15 # Darker for text on dark background
@@ -528,9 +528,23 @@ class MainWindow(QMainWindow):
         app_max_words_bound = self.max_words_spinbox.value()
 
         for echo_item in echo_results:
+            normalized_phrase = echo_item['phrase']
             total_occurrences = len(echo_item['occurrences'])
             phrase_word_count = echo_item['words']
-            for occurrence_index, occ in enumerate(echo_item['occurrences']):
+            
+            # Reconstruct the regex to find the actual spans in the original text
+            # This ensures punctuation is correctly handled by the regex, not explicitly removed
+            words_for_regex = re.split(r'\s+', normalized_phrase)
+            pattern = r'\b' + r'\W*'.join(re.escape(word) for word in words_for_regex) + r'\b'
+            
+            found_matches = []
+            for match in re.finditer(pattern, original_text, re.IGNORECASE):
+                found_matches.append((match.start(), match.end()))
+            
+            # Sort matches by start position to ensure correct occurrence_index
+            found_matches.sort(key=lambda x: x[0])
+
+            for occurrence_index, (start, end) in enumerate(found_matches):
                 color = get_echo_occurrence_hsl_color(
                     occurrence_index=occurrence_index,
                     total_occurrences=total_occurrences,
@@ -538,7 +552,7 @@ class MainWindow(QMainWindow):
                     app_min_words_bound=app_min_words_bound,
                     app_max_words_bound=app_max_words_bound
                 )
-                echo_spans.append((occ['start'], occ['end'], color))
+                echo_spans.append((start, end, color))
 
         # Sort spans by start position
         echo_spans.sort(key=lambda x: x[0])
