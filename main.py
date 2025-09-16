@@ -1,6 +1,7 @@
 # main.py
 import re
 import sys
+import os # For checking spacy model
 
 from PySide6.QtCore import (QCoreApplication, QSettings, Qt, QTimer, Slot, QRegularExpression)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QKeySequence, QPalette,
@@ -14,6 +15,22 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog,
 
 from model import ProjectModel
 
+# Attempt to load SpaCy model globally or on first use
+# This must be done on the main thread if not handled by a worker
+nlp = None
+try:
+    import spacy
+    # Load the English model if spacy is available. This happens on the main thread.
+    # For robust production code, this could be offloaded to a worker or checked at runtime.
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    # Model not found/downloaded, nlp remains None. Will be handled gracefully in export.
+    print("SpaCy 'en_core_web_sm' model not found. Semantic Echo export will be disabled.")
+except ImportError:
+    # Spacy library itself not installed, nlp remains None. Will be handled gracefully.
+    print("SpaCy library not installed. Semantic Echo export will be disabled.")
+except Exception as e:
+    print(f"Error loading SpaCy model: {e}. Semantic Echo export will be disabled.")
 
 class MainWindow(QMainWindow):
     """The main application window."""
@@ -48,6 +65,7 @@ class MainWindow(QMainWindow):
         """Compares current state to the last clean state and updates the UI."""
         is_dirty = self._get_current_state_snapshot() != self.last_clean_state
         self.narrative_text_edit.setStyleSheet("border: 1px solid red;" if is_dirty else "")
+        self.update_export_actions_state(not is_dirty and bool(self.model.data.get("echo_results")))
 
     def _setup_ui(self):
         main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -106,10 +124,25 @@ class MainWindow(QMainWindow):
         action_save_as = QAction("Save &As...", self)
         action_save_as.setShortcut(QKeySequence(QKeySequence.StandardKey.SaveAs))
         action_save_as.triggered.connect(self.on_save_as_project)
+        
+        file_menu.addActions([action_new, action_open, action_save, action_save_as])
+        file_menu.addSeparator()
+
+        self.action_export_echo_list = QAction("Export &Echo List (html)", self)
+        self.action_export_echo_list.triggered.connect(self.on_export_echo_list_html)
+        file_menu.addAction(self.action_export_echo_list)
+
+        self.action_export_semantic_echo = QAction("Export &Semantic Echo (html)", self)
+        # Disable semantic export if spacy model is not loaded
+        self.action_export_semantic_echo.setEnabled(nlp is not None) 
+        # self.action_export_semantic_echo.triggered.connect(self.on_export_semantic_echo_html) # Connect when implemented
+        file_menu.addAction(self.action_export_semantic_echo)
+        file_menu.addSeparator()
+        
         action_exit = QAction("E&xit", self)
         action_exit.setShortcut(QKeySequence(QKeySequence.StandardKey.Quit))
         action_exit.triggered.connect(self.close)
-        file_menu.addActions([action_new, action_open, action_save, action_save_as, action_exit])
+        file_menu.addAction(action_exit)
 
         action_paste = QAction("&Paste from Clipboard", self)
         action_paste.setShortcut(QKeySequence(QKeySequence.StandardKey.Paste))
@@ -171,6 +204,8 @@ class MainWindow(QMainWindow):
         self.debounce_timer = QTimer(self)
         self.debounce_timer.setSingleShot(True)
         self.debounce_timer.setInterval(250)
+        
+        self.update_export_actions_state(False) # Initial state disabled
 
     def _connect_signals(self):
         self.model.project_loaded.connect(self.on_project_loaded)
@@ -221,6 +256,7 @@ class MainWindow(QMainWindow):
         self.last_clean_state = self._get_current_state_snapshot()
         self._check_dirty_state()
         self.update_process_button_state()
+        self.update_export_actions_state(bool(data.get("echo_results")))
 
     @Slot(list)
     def update_results_table(self, results):
@@ -243,6 +279,7 @@ class MainWindow(QMainWindow):
 
         self.last_clean_state = self._get_current_state_snapshot()
         self._check_dirty_state()
+        self.update_export_actions_state(bool(results)) # Enable/disable export actions
 
     @Slot(list)
     def update_whitelist_display(self, whitelist):
@@ -411,6 +448,228 @@ class MainWindow(QMainWindow):
         text = self.narrative_text_edit.toPlainText()
         word_count = len(re.findall(r'\b\w+\b', text))
         self.process_button.setEnabled(word_count >= self.min_words_spinbox.value())
+
+    def update_export_actions_state(self, enable: bool):
+        self.action_export_echo_list.setEnabled(enable)
+        # Only enable semantic export if SpaCy is loaded AND echoes exist
+        self.action_export_semantic_echo.setEnabled(enable and nlp is not None) 
+
+    # Helper function for newline processing
+    def _convert_newlines_to_html(self, text_segment: str) -> str:
+        """Converts various newline patterns to HTML <br> tags."""
+        text_segment = text_segment.replace('\r\n', '\n') # Normalize line endings
+        text_segment = re.sub(r'\n{3,}', '<br><br><br>', text_segment) # Triple+ newlines
+        text_segment = re.sub(r'\n{2}', '<br><br>', text_segment)      # Double newlines
+        text_segment = re.sub(r'\n', '<br>', text_segment)             # Single newlines
+        return text_segment
+
+    def on_export_echo_list_html(self):
+        if not self.model.data.get("echo_results"):
+            QMessageBox.information(self, "Export HTML", "No echo results to export. Please run analysis first.")
+            return
+
+        filepath, _ = QFileDialog.getSaveFileName(self, "Export Echo List (HTML)", "", "HTML Files (*.html)")
+        if not filepath: return
+        
+        original_text = self.model.data.get("original_text", "")
+        echo_results = self.model.data.get("echo_results", [])
+
+        # Prepare a list of (start, end, color) for all echo occurrences
+        echo_spans = []
+        saturation = 75
+        lightness = 15 # Darker for text on dark background
+        
+        def get_hsl_color(hue, sat=saturation, lit=lightness):
+            return f"hsl({hue}, {sat}%, {lit}%)"
+
+        def get_echo_occurrence_hsl_color(occurrence_index: int, total_occurrences: int, phrase_word_count: int, app_min_words_bound: int, app_max_words_bound: int):
+            """
+            Calculates a dynamic HSL color for an individual echo occurrence.
+            Color shifts from purple (low repetition/first instance) to red (high repetition/later instance).
+            The rate of shift is influenced by the phrase's word count.
+
+            :param occurrence_index: 0-indexed position of this specific occurrence (0 for 1st, 1 for 2nd, etc.)
+            :param total_occurrences: Total count of this phrase in the document.
+            :param phrase_word_count: Number of words in the phrase.
+            :param app_min_words_bound: The current minimum word count set in the app's spinbox.
+            :param app_max_words_bound: The current maximum word count set in the app's spinbox.
+            :return: An HSL color string.
+            """
+            if total_occurrences < 2:
+                return get_hsl_color(300) # Default to purple if somehow only 1 occurrence
+
+            # Normalize occurrence progress: 0.0 for first instance, 1.0 for last instance
+            occurrence_progress = occurrence_index / (total_occurrences - 1) if total_occurrences > 1 else 0.0
+
+            # Calculate word impact factor (0.0 for min_words_bound, 1.0 for max_words_bound)
+            # This determines how "fast" the color shifts towards red.
+            word_range = max(1, app_max_words_bound - app_min_words_bound) # Prevent division by zero
+            word_impact_factor = (phrase_word_count - app_min_words_bound) / word_range
+            word_impact_factor = max(0.0, min(1.0, word_impact_factor)) # Clamp between 0 and 1
+
+            # Define the range of severity based on word count
+            # Longer phrases shift color more aggressively (closer to red)
+            COLOR_CHANGE_RATE_MIN_WORDS = 0.2  # Max severity for a 2-word phrase at its last instance
+            COLOR_CHANGE_RATE_MAX_WORDS = 0.8  # Max severity for an 8-word phrase at its last instance
+
+            base_change_rate = COLOR_CHANGE_RATE_MIN_WORDS + (
+                (COLOR_CHANGE_RATE_MAX_WORDS - COLOR_CHANGE_RATE_MIN_WORDS) * word_impact_factor
+            )
+
+            final_severity = occurrence_progress * base_change_rate
+            final_severity = max(0.0, min(1.0, final_severity)) # Clamp final severity
+
+            # Map severity to hue (300 = Purple, 240 = Blue, 120 = Green, 60 = Yellow, 0 = Red)
+            hue = 300 - (final_severity * 300)
+            
+            return get_hsl_color(hue)
+        
+        app_min_words_bound = self.min_words_spinbox.value()
+        app_max_words_bound = self.max_words_spinbox.value()
+
+        for echo_item in echo_results:
+            total_occurrences = len(echo_item['occurrences'])
+            phrase_word_count = echo_item['words']
+            for occurrence_index, occ in enumerate(echo_item['occurrences']):
+                color = get_echo_occurrence_hsl_color(
+                    occurrence_index=occurrence_index,
+                    total_occurrences=total_occurrences,
+                    phrase_word_count=phrase_word_count,
+                    app_min_words_bound=app_min_words_bound,
+                    app_max_words_bound=app_max_words_bound
+                )
+                echo_spans.append((occ['start'], occ['end'], color))
+
+        # Sort spans by start position
+        echo_spans.sort(key=lambda x: x[0])
+
+        # Generate HTML content by processing the original text and inserting highlights
+        html_parts = []
+        current_idx = 0
+
+        for echo_start, echo_end, echo_color in echo_spans:
+            # Add text before this echo, converting newlines
+            if echo_start > current_idx:
+                segment = original_text[current_idx:echo_start]
+                html_parts.append(self._convert_newlines_to_html(segment))
+            
+            # Add the highlighted echo itself
+            highlighted_text = original_text[echo_start:echo_end]
+            html_parts.append(
+                f'<span class="echo-highlight" style="background-color: {echo_color};">'
+                f'{highlighted_text}'
+                f'</span>'
+            )
+            current_idx = echo_end
+        
+        # Add any remaining text after the last echo, converting newlines
+        if current_idx < len(original_text):
+            segment = original_text[current_idx:]
+            html_parts.append(self._convert_newlines_to_html(segment))
+        
+        html_text_with_echo_highlights = ''.join(html_parts)
+
+        # Final HTML structure based on PoC template for Echo List
+        # semantic_echo_html_content will be empty for now
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+<title>Repetition Heatmap</title>
+<style>
+body {{ font-family: sans-serif; background-color: #333; color: white; }}
+#toggles {{ position: fixed; top: 10px; left: 25%; transform: translateX(-50%); text-align: center; }}
+#toggles button {{ margin-right: 10px; padding: 5px 10px; cursor: pointer; }}
+#semantic-echo-view {{ display: none; }} /* Initially hide semantic view */
+.no-colors #semantic-echo-view p, .no-colors #echo-list-view span.echo-highlight {{ background-color: transparent !important; }} /* Hide colors */
+.echo-highlight {{ padding: 0.1em 0.2em; border-radius: 0.2em; }} /* Consistent styling */
+</style>
+</head>
+<body class="show-colors">
+
+<div id="color-legend" style="margin-bottom: 20px;">
+    <h3>Color Legend: Repetition Level</h3>
+    <div style="display: flex; align-items: center; flex-wrap: wrap;">
+        <span style="background-color: hsl(300, {saturation}%, {lightness}%); width: 30px; height: 30px; display: inline-block; margin-right: 5px; border: 1px solid #555;"></span> Purple: Very Low Repetition   
+        <span style="background-color: hsl(240, {saturation}%, {lightness}%); width: 30px; height: 30px; display: inline-block; margin-right: 5px; border: 1px solid #555;"></span> Blue: Low Repetition   
+        <span style="background-color: hsl(120, {saturation}%, {lightness}%); width: 30px; height: 30px; display: inline-block; margin-right: 5px; border: 1px solid #555;"></span> Green: Moderate Repetition   
+        <span style="background-color: hsl(60 , {saturation}%, {lightness}%); width: 30px; height: 30px; display: inline-block; margin-right: 5px; border: 1px solid #555;"></span> Yellow: High Repetition   
+        <span style="background-color: hsl(0  , {saturation}%, {lightness}%); width: 30px; height: 30px; display: inline-block; margin-right: 5px; border: 1px solid #555;"></span> Red: Very High Repetition (Review)
+    </div>
+</div>
+
+<div id="toggles">
+    <button id="toggle-view">Semantic Echo View</button>
+    <button id="toggle-colors">Hide Colors</button>
+</div>
+
+<h2 id="semantic-echo-header" style="display: none;">Echo List and Semantic Echo Level Repetition</h2>
+<div id="semantic-echo-view">
+    <!-- Semantic Echo content will be generated here when feature is enabled -->
+    <p style="text-align: center; color: gray;">Semantic Echo analysis is not yet implemented.</p>
+</div>
+
+<h2 id="echo-list-header">Echo List Level Repetition</h2>
+<div id="echo-list-view" style="display: block;">
+    {html_text_with_echo_highlights}
+</div>
+
+<script>
+    const toggleViewButton = document.getElementById('toggle-view');
+    const toggleColorsButton = document.getElementById('toggle-colors');
+    const semanticEchoView = document.getElementById('semantic-echo-view');
+    const echoListView = document.getElementById('echo-list-view');
+    const semanticEchoHeader = document.getElementById('semantic-echo-header');
+    const echoListHeader = document.getElementById('echo-list-header');
+    let isEchoListView = true;
+    let areColorsVisible = true;
+
+    // Initial state setup
+    semanticEchoView.style.display = 'none';
+    semanticEchoHeader.style.display = 'none';
+    echoListView.style.display = 'block';
+    echoListHeader.style.display = 'block';
+    toggleViewButton.textContent = 'Semantic Echo View';
+
+
+    toggleViewButton.addEventListener('click', function() {{
+        isEchoListView = !isEchoListView;
+        if (isEchoListView) {{
+            semanticEchoView.style.display = 'none';
+            semanticEchoHeader.style.display = 'none';
+            echoListView.style.display = 'block';
+            echoListHeader.style.display = 'block';
+            toggleViewButton.textContent = 'Semantic Echo View';
+        }} else {{
+            semanticEchoView.style.display = 'block';
+            semanticEchoHeader.style.display = 'block';
+            echoListView.style.display = 'none';
+            echoListHeader.style.display = 'none';
+            toggleViewButton.textContent = 'Echo List View';
+        }}
+    }});
+
+    toggleColorsButton.addEventListener('click', function() {{
+        areColorsVisible = !areColorsVisible;
+        if (areColorsVisible) {{
+            document.body.classList.remove('no-colors');
+            toggleColorsButton.textContent = 'Hide Colors';
+        }} else {{
+            document.body.classList.add('no-colors');
+            toggleColorsButton.textContent = 'Show Colors';
+        }}
+    }});
+</script>
+
+</body>
+</html>"""
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            self.status_bar.showMessage(f"Echo List exported to {filepath}", 4000)
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to save HTML file: {e}")
+            self.status_bar.showMessage(f"Error saving HTML: {e}", 5000)
 
 def apply_app_settings(settings):
     available_styles = QStyleFactory.keys()
