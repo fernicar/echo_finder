@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
             self.min_words_spinbox.value(),
             self.max_words_spinbox.value(),
             self.strip_punctuation_checkbox.isChecked(),
+            self.skip_overlap_checkbox.isChecked(),
             tuple(sorted(whitelist_items))
         )
 
@@ -86,9 +87,11 @@ class MainWindow(QMainWindow):
         whitelist_layout.setContentsMargins(0, 0, 0, 0)
 
         whitelist_controls_layout = QHBoxLayout()
+        self.skip_overlap_checkbox = QCheckBox("Skip Overlapping Echoes")
         self.strip_punctuation_checkbox = QCheckBox("Strip Punctuation")
         self.add_whitelist_button = QPushButton("Add")
         self.remove_whitelist_button = QPushButton("Remove")
+        whitelist_controls_layout.addWidget(self.skip_overlap_checkbox)
         whitelist_controls_layout.addWidget(self.strip_punctuation_checkbox)
         whitelist_controls_layout.addStretch()
         whitelist_controls_layout.addWidget(QLabel("Whitelist:"))
@@ -219,6 +222,7 @@ class MainWindow(QMainWindow):
         self.min_words_spinbox.valueChanged.connect(self._check_dirty_state)
         self.max_words_spinbox.valueChanged.connect(self._check_dirty_state)
         self.strip_punctuation_checkbox.stateChanged.connect(self._check_dirty_state)
+        self.skip_overlap_checkbox.stateChanged.connect(self._check_dirty_state)
 
         self.add_whitelist_button.clicked.connect(self.on_add_whitelist)
         self.remove_whitelist_button.clicked.connect(self.on_remove_whitelist)
@@ -242,6 +246,7 @@ class MainWindow(QMainWindow):
         self.max_words_spinbox.blockSignals(False)
 
         self.strip_punctuation_checkbox.setChecked(data.get("strip_punctuation", True))
+        self.skip_overlap_checkbox.setChecked(data.get("skip_overlapping_echoes", True))
 
         preset_id = data.get("last_used_sort_preset", self.settings.value("last_used_sort_preset", "by_word_count"))
         index = self.preset_combo.findData(preset_id)
@@ -390,7 +395,7 @@ class MainWindow(QMainWindow):
         
         # Build a regex that finds the words separated by non-word characters
         words = re.split(r'\s+', search_text)
-        pattern = r'\b' + r'\W+'.join(re.escape(word) for word in words) + r'\b'
+        pattern = r'\b' + r'\W*'.join(re.escape(word) for word in words) + r'\b'
         q_regex = QRegularExpression(pattern, QRegularExpression.PatternOption.CaseInsensitiveOption)
         
         palette = self.palette()
@@ -443,6 +448,7 @@ class MainWindow(QMainWindow):
         self.model.update_data("min_phrase_words", self.min_words_spinbox.value())
         self.model.update_data("max_phrase_words", self.max_words_spinbox.value())
         self.model.update_data("strip_punctuation", self.strip_punctuation_checkbox.isChecked())
+        self.model.update_data("skip_overlapping_echoes", self.skip_overlap_checkbox.isChecked())
 
     def update_process_button_state(self):
         text = self.narrative_text_edit.toPlainText()

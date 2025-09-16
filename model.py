@@ -12,7 +12,7 @@ class WorkerSignals(QObject):
 
 class EchoFinderWorker(QRunnable):
     """Worker thread for finding echoes in text."""
-    def __init__(self, text, min_words, max_words, whitelist, strip_punctuation):
+    def __init__(self, text, min_words, max_words, whitelist, strip_punctuation, skip_overlapping_echoes):
         super().__init__()
         self.text = text
         self.min_words = min_words
@@ -21,56 +21,63 @@ class EchoFinderWorker(QRunnable):
         self.whitelist_lower = {w.lower() for w in whitelist}
         self.whitelist_original = whitelist # Keep original for regex
         self.strip_punctuation = strip_punctuation
+        self.skip_overlapping_echoes = skip_overlapping_echoes
         self.signals = WorkerSignals()
 
     @Slot()
     def run(self):
         try:
             # 1. Tokenization
-            self.signals.progress.emit("Step 1/4: Tokenizing text...")
+            self.signals.progress.emit("Step 1/5: Tokenizing text...")
             
-            escaped_whitelist = [re.escape(w) for w in self.whitelist_original]
-            escaped_whitelist.sort(key=len, reverse=True)
-            general_word_pattern = r'\b[a-zA-Z0-9\'’`]+\b'
-            
-            # This pattern finds any sequence of non-whitespace, which is a good
-            # base for both stripping and non-stripping modes.
-            token_pattern = r'\S+'
-            
+            token_pattern = r'\S+' # Matches any sequence of non-whitespace characters
             tokens = []
             
             for match in re.finditer(token_pattern, self.text):
-                original_word = match.group(0)
+                original_word_segment = match.group(0)
                 start, end = match.span()
                 
-                # --- Normalization Logic ---
-                normalized_word = original_word.lower()
-                is_whitelisted = normalized_word in self.whitelist_lower
+                # --- Normalization Logic for internal 'phrase' key ---
+                normalized_word = original_word_segment.lower()
+                
+                # Case-insensitive whitelist check
+                is_whitelisted = False
+                for w_item in self.whitelist_original:
+                    if original_word_segment.lower() == w_item.lower():
+                        is_whitelisted = True
+                        break
 
                 if not is_whitelisted:
+                    # Non-whitelisted words:
                     if self.strip_punctuation:
-                        # Aggressively strip leading/trailing punctuation for non-whitelisted words
-                        normalized_word = re.sub(r'^[^\w\s]+|[^\w\s]+$', '', normalized_word)
-                    # If not stripping, the normalized_word remains as is (e.g., "hello,")
+                        # Aggressively strip leading/trailing punctuation
+                        normalized_word = re.sub(r'^[^\w\s]+|[^\w\s]+$', '', normalized_word, flags=re.UNICODE)
+                    # Else (strip_punctuation is False), normalized_word remains as is (e.g., "hello,")
                 
-                # We only care about tokens that result in a non-empty normalized word
+                # Only care about tokens that result in a non-empty normalized word for phrase generation
                 if normalized_word:
-                    tokens.append({'normalized': normalized_word, 'start': start, 'end': end})
+                    tokens.append({'normalized': normalized_word, 'original': original_word_segment, 'start': start, 'end': end})
 
             if tokens:
-                text_word_count = len(re.findall(r'\b\w+\b', self.text))
+                # Count actual words (alphanumeric sequences) in the original text for max_words_available
+                text_word_count = len(re.findall(r'\b[a-zA-Z0-9\'’`]+\b', self.text, flags=re.UNICODE))
                 self.signals.max_words_available.emit(text_word_count)
+            else:
+                self.signals.max_words_available.emit(0) # No words found
 
             # 2. N-gram Generation
-            self.signals.progress.emit("Step 2/4: Generating phrases...")
+            self.signals.progress.emit("Step 2/5: Generating phrases...")
             phrase_occurrences = {}
             for n in range(self.min_words, self.max_words + 1):
+                if n == 0: continue # Skip 0-word phrases
                 if n > len(tokens): break
                 for i in range(len(tokens) - n + 1):
                     phrase_tokens = tokens[i : i + n]
+                    
                     # The phrase key is ALWAYS built from normalized words
                     phrase_key = " ".join(t['normalized'] for t in phrase_tokens)
                     
+                    # Store original occurrence span for later
                     occurrence = {'start': phrase_tokens[0]['start'], 'end': phrase_tokens[-1]['end']}
                     
                     if phrase_key not in phrase_occurrences:
@@ -78,43 +85,75 @@ class EchoFinderWorker(QRunnable):
                     phrase_occurrences[phrase_key].append(occurrence)
 
             # 3. Frequency Filtering
-            self.signals.progress.emit("Step 3/4: Filtering frequent phrases...")
+            self.signals.progress.emit("Step 3/5: Filtering frequent phrases...")
             repeated_phrases = {
                 phrase: occurrences
                 for phrase, occurrences in phrase_occurrences.items()
                 if len(occurrences) >= 2
             }
 
-            # 4. Maximal Match Filtering
-            self.signals.progress.emit("Step 4/4: Finding maximal echoes...")
-            sorted_phrases = sorted(repeated_phrases.keys(), key=lambda p: len(p.split()), reverse=True)
-            
-            maximal_echoes = {}
-            for phrase in sorted_phrases:
-                is_subphrase = False
-                for existing_max_phrase in maximal_echoes:
-                    if phrase in existing_max_phrase:
-                        is_subphrase = True
-                        break
-                if not is_subphrase:
-                    maximal_echoes[phrase] = repeated_phrases[phrase]
-
-            # Build final result list with the verbatim representative phrase
-            results = []
-            for phrase_key, occurrences in maximal_echoes.items():
+            # Prepare richer candidates with first_occurrence_start for sorting
+            candidate_echoes = []
+            for phrase_key, occurrences in repeated_phrases.items():
                 first_occurrence = occurrences[0]
-                # THIS IS THE CRITICAL FIX: Always slice the original text for display
                 representative_original = self.text[first_occurrence['start']:first_occurrence['end']]
-                results.append({
-                    'phrase': phrase_key, # The normalized key for logic
-                    'representative_original': representative_original, # The verbatim for display/search
+                candidate_echoes.append({
+                    'phrase': phrase_key,
+                    'representative_original': representative_original,
                     'count': len(occurrences),
                     'words': len(phrase_key.split()),
                     'occurrences': occurrences,
+                    'first_occurrence_start': first_occurrence['start']
                 })
 
-            self.signals.result.emit(results)
+            final_results = []
+            if self.skip_overlapping_echoes:
+                self.signals.progress.emit("Step 4/5: Applying skip overlap filtering...")
+                # Sort by words (desc), count (desc), first_occurrence_start (asc)
+                candidate_echoes.sort(key=lambda x: (-x['words'], -x['count'], x['first_occurrence_start']))
+                
+                covered_indices = [False] * (len(self.text) + 1) # +1 for exclusive end index
+                
+                for echo_candidate in candidate_echoes:
+                    overlaps_existing_selection = False
+                    # Check all occurrences of the candidate
+                    for occ in echo_candidate['occurrences']:
+                        # Check if any part of this occurrence is already covered
+                        if any(covered_indices[i] for i in range(occ['start'], occ['end'])):
+                            overlaps_existing_selection = True
+                            break # This occurrence overlaps, no need to check others for this candidate
+                    
+                    if not overlaps_existing_selection:
+                        final_results.append(echo_candidate)
+                        # Mark all occurrences of this selected candidate as covered
+                        for occ in echo_candidate['occurrences']:
+                            for i in range(occ['start'], occ['end']):
+                                covered_indices[i] = True
+            else:
+                self.signals.progress.emit("Step 4/5: Applying maximal match filtering...")
+                # Existing Maximal Match Filtering (substring removal)
+                # Sort by words (desc) to ensure longer phrases are processed first
+                candidate_echoes.sort(key=lambda p: p['words'], reverse=True)
+                
+                maximal_echoes_processed = set() # Store normalized phrases already marked as maximal
+                
+                for candidate in candidate_echoes:
+                    is_substring_of_existing_maximal = False
+                    for existing_max_phrase in maximal_echoes_processed:
+                        if candidate['phrase'] in existing_max_phrase:
+                            is_substring_of_existing_maximal = True
+                            break
+                    
+                    if not is_substring_of_existing_maximal:
+                        final_results.append(candidate)
+                        maximal_echoes_processed.add(candidate['phrase'])
+
+            self.signals.progress.emit("Step 5/5: Finalizing results...")
+            self.signals.result.emit(final_results)
+
         except Exception as e:
+            import traceback
+            traceback.print_exc() # Print full traceback for debugging
             self.signals.error.emit((e, "Error during text processing."))
         finally:
             self.signals.finished.emit()
@@ -142,6 +181,7 @@ class ProjectModel(QObject):
             "min_phrase_words": 2,
             "max_phrase_words": 8,
             "strip_punctuation": True,
+            "skip_overlapping_echoes": True,
             "custom_whitelist": ["Dr.", "Mr.", "Mrs.", "St.", "e.g.", "i.e."],
             "last_used_sort_preset": preferred_preset,
             "echo_results": []
@@ -155,6 +195,13 @@ class ProjectModel(QObject):
                 import json
                 self.data = json.load(f)
                 self.current_project_path = filepath
+                
+                # Provide default values for new keys if loading old project files
+                self.data.setdefault("strip_punctuation", True)
+                self.data.setdefault("skip_overlapping_echoes", True) 
+                self.data.setdefault("last_used_sort_preset", "by_word_count")
+                self.data.setdefault("custom_whitelist", ["Dr.", "Mr.", "Mrs.", "St.", "e.g.", "i.e."])
+
                 self.project_loaded.emit(self.data)
                 self.status_message.emit(f"Project '{self.data.get('project_name', 'Unnamed')}' loaded.", 4000)
         except Exception as e:
@@ -181,7 +228,8 @@ class ProjectModel(QObject):
             min_words=self.data.get("min_phrase_words", 2),
             max_words=self.data.get("max_phrase_words", 8),
             whitelist=self.data.get("custom_whitelist", []),
-            strip_punctuation=self.data.get("strip_punctuation", True)
+            strip_punctuation=self.data.get("strip_punctuation", True),
+            skip_overlapping_echoes=self.data.get("skip_overlapping_echoes", True)
         )
         worker.signals.result.connect(self._on_processing_result)
         worker.signals.progress.connect(lambda msg: self.status_message.emit(msg, 0))
