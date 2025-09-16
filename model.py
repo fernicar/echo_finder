@@ -17,7 +17,9 @@ class EchoFinderWorker(QRunnable):
         self.text = text
         self.min_words = min_words
         self.max_words = max_words
-        self.whitelist = whitelist
+        # Create a lowercase set for fast, case-insensitive lookups
+        self.whitelist_lower = {w.lower() for w in whitelist}
+        self.whitelist_original = whitelist # Keep original for regex
         self.strip_punctuation = strip_punctuation
         self.signals = WorkerSignals()
 
@@ -27,40 +29,34 @@ class EchoFinderWorker(QRunnable):
             # 1. Tokenization
             self.signals.progress.emit("Step 1/4: Tokenizing text...")
             
-            # Build a regex that prioritizes whitelisted words
-            # This ensures "Dr." is matched before a general word match might just find "Dr"
-            escaped_whitelist = [re.escape(w) for w in self.whitelist]
-            # Sort by length descending to match longer entries first (e.g., "i.e." before "i.")
+            escaped_whitelist = [re.escape(w) for w in self.whitelist_original]
             escaped_whitelist.sort(key=len, reverse=True)
-            
-            # The general pattern for words
             general_word_pattern = r'\b[a-zA-Z0-9\'’`]+\b'
             
-            # Combine them, prioritizing the whitelist
-            # The whitelist part captures case-sensitively
-            # The general part captures case-insensitively via re.IGNORECASE flag
-            patterns = escaped_whitelist + [general_word_pattern]
-            combined_pattern = re.compile("|".join(patterns))
-
+            # This pattern finds any sequence of non-whitespace, which is a good
+            # base for both stripping and non-stripping modes.
+            token_pattern = r'\S+'
+            
             tokens = []
-            max_words_in_sentence = 0
-            current_sentence_word_count = 0
+            
+            for match in re.finditer(token_pattern, self.text):
+                original_word = match.group(0)
+                start, end = match.span()
+                
+                # --- Normalization Logic ---
+                normalized_word = original_word.lower()
+                is_whitelisted = normalized_word in self.whitelist_lower
 
-            if self.strip_punctuation:
-                for match in combined_pattern.finditer(self.text):
-                    word = match.group(0)
-                    start, end = match.span()
-                    
-                    # Only lowercase if it's NOT in the whitelist
-                    token_word = word if word in self.whitelist else word.lower()
-                    tokens.append({'word': token_word, 'start': start, 'end': end})
-            else: # Literal tokenization
-                for match in re.finditer(r'\S+', self.text):
-                    word = match.group(0)
-                    start, end = match.span()
-                    tokens.append({'word': word, 'start': start, 'end': end})
+                if not is_whitelisted:
+                    if self.strip_punctuation:
+                        # Aggressively strip leading/trailing punctuation for non-whitelisted words
+                        normalized_word = re.sub(r'^[^\w\s]+|[^\w\s]+$', '', normalized_word)
+                    # If not stripping, the normalized_word remains as is (e.g., "hello,")
+                
+                # We only care about tokens that result in a non-empty normalized word
+                if normalized_word:
+                    tokens.append({'normalized': normalized_word, 'start': start, 'end': end})
 
-            # Calculate max words for the UI spinbox
             if tokens:
                 text_word_count = len(re.findall(r'\b\w+\b', self.text))
                 self.signals.max_words_available.emit(text_word_count)
@@ -72,14 +68,14 @@ class EchoFinderWorker(QRunnable):
                 if n > len(tokens): break
                 for i in range(len(tokens) - n + 1):
                     phrase_tokens = tokens[i : i + n]
-                    phrase_text = " ".join(t['word'] for t in phrase_tokens)
+                    # The phrase key is ALWAYS built from normalized words
+                    phrase_key = " ".join(t['normalized'] for t in phrase_tokens)
                     
-                    # The occurrence tracks the start of the first word and end of the last word
                     occurrence = {'start': phrase_tokens[0]['start'], 'end': phrase_tokens[-1]['end']}
                     
-                    if phrase_text not in phrase_occurrences:
-                        phrase_occurrences[phrase_text] = []
-                    phrase_occurrences[phrase_text].append(occurrence)
+                    if phrase_key not in phrase_occurrences:
+                        phrase_occurrences[phrase_key] = []
+                    phrase_occurrences[phrase_key].append(occurrence)
 
             # 3. Frequency Filtering
             self.signals.progress.emit("Step 3/4: Filtering frequent phrases...")
@@ -91,12 +87,10 @@ class EchoFinderWorker(QRunnable):
 
             # 4. Maximal Match Filtering
             self.signals.progress.emit("Step 4/4: Finding maximal echoes...")
-            # Sort by word count descending, so we process longer phrases first
             sorted_phrases = sorted(repeated_phrases.keys(), key=lambda p: len(p.split()), reverse=True)
             
             maximal_echoes = {}
             for phrase in sorted_phrases:
-                # Check if this phrase is a substring of an already-accepted longer phrase
                 is_subphrase = False
                 for existing_max_phrase in maximal_echoes:
                     if phrase in existing_max_phrase:
@@ -105,16 +99,17 @@ class EchoFinderWorker(QRunnable):
                 if not is_subphrase:
                     maximal_echoes[phrase] = repeated_phrases[phrase]
 
-            # Build final result list
+            # Build final result list with the verbatim representative phrase
             results = []
-            for phrase, occurrences in maximal_echoes.items():
+            for phrase_key, occurrences in maximal_echoes.items():
                 first_occurrence = occurrences[0]
+                # THIS IS THE CRITICAL FIX: Always slice the original text for display
                 representative_original = self.text[first_occurrence['start']:first_occurrence['end']]
                 results.append({
-                    'phrase': phrase,
-                    'representative_original': representative_original,
+                    'phrase': phrase_key, # The normalized key for logic
+                    'representative_original': representative_original, # The verbatim for display/search
                     'count': len(occurrences),
-                    'words': len(phrase.split()),
+                    'words': len(phrase_key.split()),
                     'occurrences': occurrences,
                 })
 
@@ -139,7 +134,7 @@ class ProjectModel(QObject):
         self.threadpool = QThreadPool()
         self.status_message.emit("Ready. Create a new project or open an existing one.", 0)
 
-    def new_project(self, preferred_preset="longest_first_by_word_count"):
+    def new_project(self, preferred_preset="by_word_count"):
         self.current_project_path = None
         self.data = {
             "project_name": "Unnamed Project",
@@ -200,11 +195,13 @@ class ProjectModel(QObject):
         self.sort_results() # Apply current sort order to new results
 
     def sort_results(self):
-        preset = self.data.get("last_used_sort_preset", "longest_first_by_word_count")
-        if preset == "longest_first_by_word_count":
+        preset = self.data.get("last_used_sort_preset", "by_word_count")
+        if preset == "by_word_count":
+            # Sort by words (desc), then count (desc), then phrase (asc)
             self.data["echo_results"].sort(key=lambda x: (-x['words'], -x['count'], x['phrase']))
-        elif preset == "most_repeated_short_to_long":
-            self.data["echo_results"].sort(key=lambda x: (-x['count'], x['words'], x['phrase']))
+        elif preset == "by_repetition_count":
+            # Sort by count (desc), then words (desc), then phrase (asc)
+            self.data["echo_results"].sort(key=lambda x: (-x['count'], -x['words'], x['phrase']))
         
         self.echo_results_updated.emit(self.data["echo_results"])
 
@@ -214,11 +211,14 @@ class ProjectModel(QObject):
     def add_whitelist_entry(self, entry):
         if "custom_whitelist" not in self.data:
             self.data["custom_whitelist"] = []
-        if entry not in self.data["custom_whitelist"]:
+        # Case-insensitive check before adding
+        if not any(entry.lower() == item.lower() for item in self.data["custom_whitelist"]):
             self.data["custom_whitelist"].append(entry)
             self.whitelist_updated.emit(self.data["custom_whitelist"])
     
     def remove_whitelist_entry(self, entry):
-        if "custom_whitelist" in self.data and entry in self.data["custom_whitelist"]:
-            self.data["custom_whitelist"].remove(entry)
+        # Case-insensitive removal
+        entry_lower = entry.lower()
+        if "custom_whitelist" in self.data:
+            self.data["custom_whitelist"] = [item for item in self.data["custom_whitelist"] if item.lower() != entry_lower]
             self.whitelist_updated.emit(self.data["custom_whitelist"])

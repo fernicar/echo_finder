@@ -2,7 +2,7 @@
 import re
 import sys
 
-from PySide6.QtCore import (QCoreApplication, QSettings, Qt, QTimer, Slot)
+from PySide6.QtCore import (QCoreApplication, QSettings, Qt, QTimer, Slot, QRegularExpression)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QKeySequence, QPalette,
                            QTextCharFormat, QTextCursor)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog,
@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("echo_finder")
+        self.setWindowTitle("echo_finder_TINS_Edition")
         self.setGeometry(100, 100, 1200, 800)
 
         self.settings = QSettings()
@@ -140,7 +140,7 @@ class MainWindow(QMainWindow):
             self.theme_menu.addAction(action)
             self.theme_action_group.addAction(action)
 
-        action_about = QAction("&About echo_finder", self)
+        action_about = QAction("&About echo_finder_TINS_Edition", self)
         action_about.triggered.connect(self.on_about)
         help_menu.addAction(action_about)
 
@@ -159,8 +159,8 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addWidget(QLabel("Preset: "))
         self.preset_combo = QComboBox()
-        self.preset_combo.addItem("Longest First (by Word Count)", "longest_first_by_word_count")
-        self.preset_combo.addItem("Most Repeated (Short to Long)", "most_repeated_short_to_long")
+        self.preset_combo.addItem("By Word Count (Desc)", "by_word_count")
+        self.preset_combo.addItem("By Repetition Count (Desc)", "by_repetition_count")
         toolbar.addWidget(self.preset_combo)
         toolbar.addSeparator()
         toolbar.addWidget(QLabel("Highlight:"))
@@ -199,18 +199,23 @@ class MainWindow(QMainWindow):
     @Slot(dict)
     def on_project_loaded(self, data):
         self.narrative_text_edit.setText(data.get("original_text", ""))
+        self.min_words_spinbox.blockSignals(True)
+        self.max_words_spinbox.blockSignals(True)
         self.min_words_spinbox.setValue(data.get("min_phrase_words", 2))
         self.max_words_spinbox.setValue(data.get("max_phrase_words", 8))
+        self.min_words_spinbox.blockSignals(False)
+        self.max_words_spinbox.blockSignals(False)
+
         self.strip_punctuation_checkbox.setChecked(data.get("strip_punctuation", True))
 
-        preset_id = data.get("last_used_sort_preset", self.settings.value("last_used_sort_preset", "longest_first_by_word_count"))
+        preset_id = data.get("last_used_sort_preset", self.settings.value("last_used_sort_preset", "by_word_count"))
         index = self.preset_combo.findData(preset_id)
         if index >= 0: self.preset_combo.setCurrentIndex(index)
 
         self.update_whitelist_display(data.get("custom_whitelist", []))
         self.update_results_table(data.get("echo_results", []))
 
-        self.setWindowTitle(f"echo_finder - {data.get('project_name', 'Unnamed Project')}")
+        self.setWindowTitle(f"echo_finder_TINS_Edition - {data.get('project_name', 'Unnamed Project')}")
         self.highlight_field.clear()
 
         self.last_clean_state = self._get_current_state_snapshot()
@@ -222,8 +227,8 @@ class MainWindow(QMainWindow):
         self.results_table.setRowCount(0)
         self.results_table.setRowCount(len(results))
         for row, item in enumerate(results):
-            # Store the verbatim phrase in the item for easy retrieval
-            phrase_item = QTableWidgetItem(item['representative_original'])
+            # Display the CLEAN, NORMALIZED phrase to the user
+            phrase_item = QTableWidgetItem(item['phrase'])
             phrase_item.setData(Qt.ItemDataRole.UserRole, item) # Store the whole result object
 
             count_item = QTableWidgetItem(str(item['count']))
@@ -247,13 +252,20 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def on_max_words_available(self, max_words):
+        self.min_words_spinbox.blockSignals(True)
+        self.max_words_spinbox.blockSignals(True)
+        
         current_max = self.max_words_spinbox.value()
-        self.max_words_spinbox.setMaximum(max(2, max_words))
-        if current_max > max_words: self.max_words_spinbox.setValue(max_words)
+        safe_max = max(2, max_words)
+        self.max_words_spinbox.setMaximum(safe_max)
+        if current_max > safe_max: self.max_words_spinbox.setValue(safe_max)
+
+        self.min_words_spinbox.blockSignals(False)
+        self.max_words_spinbox.blockSignals(False)
     
     def on_new_project(self):
         self._clear_highlights()
-        saved_preset = self.settings.value("last_used_sort_preset", "longest_first_by_word_count")
+        saved_preset = self.settings.value("last_used_sort_preset", "by_word_count")
         self.model.new_project(preferred_preset=str(saved_preset))
 
     def on_open_project(self):
@@ -273,7 +285,7 @@ class MainWindow(QMainWindow):
         if filepath:
             self._save_current_data_to_model()
             self.model.save_project(filepath)
-            self.setWindowTitle(f"echo_finder - {self.model.data['project_name']}")
+            self.setWindowTitle(f"echo_finder_TINS_Edition - {self.model.data['project_name']}")
 
     def on_process_text(self):
         self.highlight_field.clear()
@@ -283,6 +295,7 @@ class MainWindow(QMainWindow):
     def on_narrative_text_changed(self):
         self._check_dirty_state()
         self.update_process_button_state()
+        if not self.highlight_field.text(): return
         self.debounce_timer.start()
 
     def on_highlight_text_changed(self):
@@ -303,15 +316,15 @@ class MainWindow(QMainWindow):
     @Slot(QAction)
     def on_theme_changed(self, action):
         theme_id = action.data()
-        QApplication.styleHints().setColorScheme(theme_id)
+        QApplication.styleHints().setColorScheme(Qt.ColorScheme(theme_id))
         self.settings.setValue("gui/theme", theme_id)
 
     @Slot(int, int)
     def on_result_cell_clicked(self, row, column):
         phrase_item = self.results_table.item(row, 2)
         if phrase_item:
-            result_data = phrase_item.data(Qt.ItemDataRole.UserRole)
-            phrase_text = result_data['representative_original']
+            # Use the CLEAN phrase for highlighting logic and copying
+            phrase_text = phrase_item.text()
             
             self.highlight_field.setText(phrase_text)
             if self.action_auto_copy.isChecked():
@@ -326,15 +339,22 @@ class MainWindow(QMainWindow):
     @Slot()
     def _perform_live_highlight(self):
         self._clear_highlights()
-        search_text = self.highlight_field.text()
+        search_text = self.highlight_field.text().strip()
 
+        # Restore original counts before performing a new search
         for row in range(self.results_table.rowCount()):
             count_item = self.results_table.item(row, 0)
             if count_item is not None:
                 original_count = count_item.data(Qt.ItemDataRole.UserRole)
                 count_item.setText(str(original_count))
                 count_item.setForeground(QApplication.palette().text().color())
+        
         if not search_text: return
+        
+        # Build a regex that finds the words separated by non-word characters
+        words = re.split(r'\s+', search_text)
+        pattern = r'\b' + r'\W+'.join(re.escape(word) for word in words) + r'\b'
+        q_regex = QRegularExpression(pattern, QRegularExpression.PatternOption.CaseInsensitiveOption)
         
         palette = self.palette()
         highlight_color = palette.color(QPalette.ColorRole.Highlight)
@@ -347,11 +367,12 @@ class MainWindow(QMainWindow):
         cursor = QTextCursor(doc)
         found_count = 0
         while True:
-            cursor = doc.find(search_text, cursor)
+            cursor = doc.find(q_regex, cursor)
             if cursor.isNull(): break
             found_count += 1
             cursor.mergeCharFormat(highlight_format)
             
+        # Update the count for the *exact* phrase being highlighted
         for row in range(self.results_table.rowCount()):
             phrase_item = self.results_table.item(row, 2)
             if phrase_item and phrase_item.text() == search_text:
@@ -378,7 +399,7 @@ class MainWindow(QMainWindow):
         self._check_dirty_state()
 
     def on_about(self):
-        QMessageBox.about(self, "About echo_finder", "<b>echo_finder</b><p>A tool to analyze repeated phrases in text.</p><p>License: MIT</p><p>Copyright: fernicar</p><p>Repository: <a href='https://github.com/fernicar/echo_finder'>github.com/fernicar/echo_finder</a></p>")
+        QMessageBox.about(self, "About echo_finder_TINS_Edition", "<b>echo_finder_TINS_Edition</b><p>A tool to analyze repeated phrases in text.</p><p>License: MIT</p><p>Copyright: fernicar</p><p>Repository: <a href='https://github.com/fernicar/echo_finder_TINS_Edition'>github.com/fernicar/echo_finder_TINS_Edition</a></p>")
 
     def _save_current_data_to_model(self):
         self.model.update_data("original_text", self.narrative_text_edit.toPlainText())
@@ -395,13 +416,18 @@ def apply_app_settings(settings):
     available_styles = QStyleFactory.keys()
     saved_style = settings.value("gui/style", "Fusion")
     if saved_style in available_styles: QApplication.setStyle(saved_style)
-    theme_id = settings.value("gui/theme", Qt.ColorScheme.Unknown, type=int)
-    QApplication.styleHints().setColorScheme(Qt.ColorScheme(theme_id))
+    
+    try: # QSettings can return strings for enums, robustly handle it
+        theme_id_str = settings.value("gui/theme", str(Qt.ColorScheme.Unknown.value))
+        theme_id = int(theme_id_str)
+        QApplication.styleHints().setColorScheme(Qt.ColorScheme(theme_id))
+    except (ValueError, TypeError):
+        QApplication.styleHints().setColorScheme(Qt.ColorScheme.Unknown)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     QCoreApplication.setOrganizationName("fernicar")
-    QCoreApplication.setApplicationName("echo_finder")
+    QCoreApplication.setApplicationName("echo_finder_TINS_Edition")
     settings = QSettings()
     apply_app_settings(settings)
     window = MainWindow()
