@@ -3,7 +3,7 @@ import re
 import sys
 import os # For checking spacy model
 
-from PySide6.QtCore import (QCoreApplication, QSettings, Qt, QTimer, Slot, QRegularExpression)
+from PySide6.QtCore import (QCoreApplication, QSettings, Qt, QTimer, Slot, QRegularExpression, QRunnable, QObject, QThreadPool, Signal)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QKeySequence, QPalette,
                            QTextCharFormat, QTextCursor)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog,
@@ -15,22 +15,115 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog,
 
 from model import ProjectModel
 
-# Attempt to load SpaCy model globally or on first use
-# This must be done on the main thread if not handled by a worker
+# --- Dependency Loading ---
 nlp = None
+SentenceTransformer = None
+faiss = None
+np = None
+SEMANTIC_ENABLED = False
+
 try:
     import spacy
-    # Load the English model if spacy is available. This happens on the main thread.
-    # For robust production code, this could be offloaded to a worker or checked at runtime.
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    # Model not found/downloaded, nlp remains None. Will be handled gracefully in export.
-    print("SpaCy 'en_core_web_sm' model not found. Semantic Echo export will be disabled.")
-except ImportError:
-    # Spacy library itself not installed, nlp remains None. Will be handled gracefully.
-    print("SpaCy library not installed. Semantic Echo export will be disabled.")
+    import sentence_transformers
+    import faiss
+    import numpy as np
+    
+    SentenceTransformer = sentence_transformers.SentenceTransformer
+    
+    # Check for SpaCy model
+    if not spacy.util.is_package("en_core_web_sm"):
+        print("SpaCy 'en_core_web_sm' model not found. Please run: python -m spacy download en_core_web_sm")
+    else:
+        nlp = spacy.load("en_core_web_sm")
+    
+    # Check if all models/libs are loaded
+    if nlp and SentenceTransformer and faiss and np:
+        SEMANTIC_ENABLED = True
+        print("Semantic analysis dependencies loaded successfully.")
+
+except ImportError as e:
+    print(f"A required library is not installed: {e}. Semantic Echo export will be disabled.")
 except Exception as e:
-    print(f"Error loading SpaCy model: {e}. Semantic Echo export will be disabled.")
+    print(f"An error occurred during dependency loading: {e}. Semantic Echo export will be disabled.")
+
+
+# --- Worker for Semantic Export ---
+class SemanticWorkerSignals(QObject):
+    finished = Signal()
+    error = Signal(str)
+    result = Signal(str) # Emits the generated HTML string
+    progress = Signal(str)
+
+class SemanticExportWorker(QRunnable):
+    """Worker thread for the computationally expensive semantic analysis and HTML generation."""
+    def __init__(self, text_content):
+        super().__init__()
+        self.text_content = text_content
+        self.signals = SemanticWorkerSignals()
+
+    @Slot()
+    def run(self):
+        try:
+            self.signals.progress.emit("Initializing semantic models...")
+            # Initialize models inside the thread for thread-safety if needed, though SentenceTransformer is generally safe.
+            embedder = SentenceTransformer('all-MiniLM-L6-v2')
+            saturation = 75
+            lightness = 15
+
+            def get_color(similarity_score, sat=saturation, lit=lightness):
+                """Maps a similarity score (0 to 1) to an HSL color (red to magenta)."""
+                hue = (1 - similarity_score) * 300  # Red (0) to Magenta (300)
+                return f"hsl({hue}, {sat}%, {lit}%)"
+
+            self.signals.progress.emit("Splitting text into sentences...")
+            paragraphs = self.text_content.strip().split("\n\n")
+            
+            sentence_embeddings = []
+            sentence_html_colored = ""
+
+            self.signals.progress.emit("Generating embeddings (this may take a while)...")
+            all_sents = [sent.text for p in paragraphs for sent in nlp(p).sents]
+            all_embeddings = embedder.encode(all_sents, convert_to_tensor=False)
+
+            self.signals.progress.emit("Calculating similarities...")
+            for i, (sent_text, sent_embedding) in enumerate(zip(all_sents, all_embeddings)):
+                similarity_score = 0.0
+
+                if sentence_embeddings: # If there are past sentences to compare against
+                    # FAISS requires a 2D array for the index
+                    past_embeddings_np = np.array(sentence_embeddings)
+                    index = faiss.IndexFlatL2(sent_embedding.shape[0])
+                    index.add(past_embeddings_np)
+                    
+                    # FAISS search requires a 2D array for the query
+                    query_embedding_np = np.array([sent_embedding])
+                    D, I = index.search(query_embedding_np, 1) # Search for 1 nearest neighbor
+                    
+                    # Approximate cosine similarity from L2 distance
+                    # This is a heuristic that works well for normalized embeddings like those from SBERT
+                    l2_distance = D[0][0]
+                    similarity_score = 1 - (l2_distance / 2)
+
+                sentence_embeddings.append(sent_embedding)
+                color = get_color(similarity_score)
+                sentence_html_colored += f'<span style="background-color: {color}; padding: 0.2em; margin-right: 0.2em; display: inline-block;">{sent_text}</span>'
+                
+                # Check if this sentence is the last one in its paragraph
+                if i + 1 < len(all_sents):
+                    current_para_sents = [s.text for s in nlp(paragraphs[0]).sents]
+                    if sent_text == current_para_sents[-1]:
+                        sentence_html_colored += '<br><br>\n'
+                        paragraphs.pop(0)
+
+            self.signals.result.emit(sentence_html_colored)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.signals.error.emit(f"An error occurred during semantic analysis: {e}")
+        finally:
+            self.signals.finished.emit()
+
 
 class MainWindow(QMainWindow):
     """The main application window."""
@@ -41,9 +134,9 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
 
         self.settings = QSettings()
-
         self.model = ProjectModel()
         self.last_clean_state = None 
+        self.export_filepath = None # Store filepath during async export
 
         self._setup_ui()
         self._connect_signals()
@@ -136,9 +229,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.action_export_echo_list)
 
         self.action_export_semantic_echo = QAction("Export &Semantic Echo (html)", self)
-        # Disable semantic export if spacy model is not loaded
-        self.action_export_semantic_echo.setEnabled(nlp is not None) 
-        # self.action_export_semantic_echo.triggered.connect(self.on_export_semantic_echo_html) # Connect when implemented
+        self.action_export_semantic_echo.setEnabled(SEMANTIC_ENABLED)
+        self.action_export_semantic_echo.triggered.connect(self.on_export_semantic_echo_html)
         file_menu.addAction(self.action_export_semantic_echo)
         file_menu.addSeparator()
         
@@ -208,7 +300,7 @@ class MainWindow(QMainWindow):
         self.debounce_timer.setSingleShot(True)
         self.debounce_timer.setInterval(250)
         
-        self.update_export_actions_state(False) # Initial state disabled
+        self.update_export_actions_state(False)
 
     def _connect_signals(self):
         self.model.project_loaded.connect(self.on_project_loaded)
@@ -268,9 +360,8 @@ class MainWindow(QMainWindow):
         self.results_table.setRowCount(0)
         self.results_table.setRowCount(len(results))
         for row, item in enumerate(results):
-            # Display the CLEAN, NORMALIZED phrase to the user
             phrase_item = QTableWidgetItem(item['phrase'])
-            phrase_item.setData(Qt.ItemDataRole.UserRole, item) # Store the whole result object
+            phrase_item.setData(Qt.ItemDataRole.UserRole, item)
 
             count_item = QTableWidgetItem(str(item['count']))
             count_item.setData(Qt.ItemDataRole.UserRole, item['count'])
@@ -284,7 +375,7 @@ class MainWindow(QMainWindow):
 
         self.last_clean_state = self._get_current_state_snapshot()
         self._check_dirty_state()
-        self.update_export_actions_state(bool(results)) # Enable/disable export actions
+        self.update_export_actions_state(bool(results))
 
     @Slot(list)
     def update_whitelist_display(self, whitelist):
@@ -365,9 +456,7 @@ class MainWindow(QMainWindow):
     def on_result_cell_clicked(self, row, column):
         phrase_item = self.results_table.item(row, 2)
         if phrase_item:
-            # Use the CLEAN phrase for highlighting logic and copying
             phrase_text = phrase_item.text()
-            
             self.highlight_field.setText(phrase_text)
             if self.action_auto_copy.isChecked():
                 QApplication.clipboard().setText(phrase_text)
@@ -383,7 +472,6 @@ class MainWindow(QMainWindow):
         self._clear_highlights()
         search_text = self.highlight_field.text().strip()
 
-        # Restore original counts before performing a new search
         for row in range(self.results_table.rowCount()):
             count_item = self.results_table.item(row, 0)
             if count_item is not None:
@@ -393,9 +481,8 @@ class MainWindow(QMainWindow):
         
         if not search_text: return
         
-        # Build a regex that finds the words separated by non-word characters
         words = re.split(r'\s+', search_text)
-        pattern = r'\b' + r'\W*'.join(re.escape(word) for word in words) + r'\b'
+        pattern = r'\b' + r'\W*'.join(re.escape(word) for word in words) + r'\b' 
         q_regex = QRegularExpression(pattern, QRegularExpression.PatternOption.CaseInsensitiveOption)
         
         palette = self.palette()
@@ -414,7 +501,6 @@ class MainWindow(QMainWindow):
             found_count += 1
             cursor.mergeCharFormat(highlight_format)
             
-        # Update the count for the *exact* phrase being highlighted
         for row in range(self.results_table.rowCount()):
             phrase_item = self.results_table.item(row, 2)
             if phrase_item and phrase_item.text() == search_text:
@@ -457,156 +543,130 @@ class MainWindow(QMainWindow):
 
     def update_export_actions_state(self, enable: bool):
         self.action_export_echo_list.setEnabled(enable)
-        # Only enable semantic export if SpaCy is loaded AND echoes exist
-        self.action_export_semantic_echo.setEnabled(enable and nlp is not None) 
+        self.action_export_semantic_echo.setEnabled(enable and SEMANTIC_ENABLED) 
 
-    # Helper function for newline processing
     def _convert_newlines_to_html(self, text_segment: str) -> str:
-        """Converts various newline patterns to HTML <br> tags."""
-        text_segment = text_segment.replace('\r\n', '\n') # Normalize line endings
-        text_segment = re.sub(r'\n{3,}', '<br><br><br>', text_segment) # Triple+ newlines
-        text_segment = re.sub(r'\n{2}', '<br><br>', text_segment)      # Double newlines
-        text_segment = re.sub(r'\n', '<br>', text_segment)             # Single newlines
+        text_segment = text_segment.replace('\r\n', '\n')
+        text_segment = re.sub(r'\n{3,}', '<br><br><br>', text_segment)
+        text_segment = re.sub(r'\n{2}', '<br><br>', text_segment)
+        text_segment = re.sub(r'\n', '<br>', text_segment)
         return text_segment
+
+    def _generate_echo_list_html_content(self) -> str:
+        original_text = self.model.data.get("original_text", "")
+        echo_results = self.model.data.get("echo_results", [])
+        
+        saturation = 75
+        lightness = 15
+
+        def get_hsl_color(hue, sat=saturation, lit=lightness): return f"hsl({hue}, {sat}%, {lit}%)"
+        
+        def get_echo_occurrence_hsl_color(occurrence_index: int, total_occurrences: int, phrase_word_count: int):
+            if total_occurrences < 2: return get_hsl_color(300)
+            occurrence_progress = occurrence_index / (total_occurrences - 1) if total_occurrences > 1 else 0.0
+
+            MIN_WORD_SEVERITY_THRESHOLD, MAX_WORD_SEVERITY_THRESHOLD, INSTANT_RED_WORD_THRESHOLD = 2, 4, 16
+            
+            if phrase_word_count >= INSTANT_RED_WORD_THRESHOLD:
+                final_severity = 1.0
+            else:
+                if phrase_word_count <= MIN_WORD_SEVERITY_THRESHOLD: max_severity = 0.2
+                elif phrase_word_count >= MAX_WORD_SEVERITY_THRESHOLD: max_severity = 1.0
+                else:
+                    norm_wc = (phrase_word_count - MIN_WORD_SEVERITY_THRESHOLD) / (MAX_WORD_SEVERITY_THRESHOLD - MIN_WORD_SEVERITY_THRESHOLD)
+                    max_severity = 0.2 + (1.0 - 0.2) * norm_wc
+                final_severity = occurrence_progress * max_severity
+            
+            final_severity = max(0.0, min(1.0, final_severity))
+            hue = 300 - (final_severity * 300)
+            return get_hsl_color(hue)
+
+        all_spans = []
+        for echo_item in echo_results:
+            words = re.split(r'\s+', echo_item['phrase'])
+            pattern = r'\b' + r'\W*'.join(re.escape(word) for word in words) + r'\b'
+            
+            matches = sorted([(m.start(), m.end()) for m in re.finditer(pattern, original_text, re.IGNORECASE)], key=lambda x: x[0])
+            
+            for i, (start, end) in enumerate(matches):
+                color = get_echo_occurrence_hsl_color(i, len(matches), echo_item['words'])
+                all_spans.append((start, end, color))
+        
+        all_spans.sort(key=lambda x: x[0])
+        
+        html_parts, current_idx = [], 0
+        for start, end, color in all_spans:
+            if start > current_idx: html_parts.append(self._convert_newlines_to_html(original_text[current_idx:start]))
+            html_parts.append(f'<span class="echo-highlight" style="background-color: {color};">{original_text[start:end]}</span>')
+            current_idx = end
+        if current_idx < len(original_text): html_parts.append(self._convert_newlines_to_html(original_text[current_idx:]))
+        
+        return "".join(html_parts)
 
     def on_export_echo_list_html(self):
         if not self.model.data.get("echo_results"):
-            QMessageBox.information(self, "Export HTML", "No echo results to export. Please run analysis first.")
+            QMessageBox.information(self, "Export HTML", "No echo results to export.")
             return
-
         filepath, _ = QFileDialog.getSaveFileName(self, "Export Echo List (HTML)", "", "HTML Files (*.html)")
         if not filepath: return
         
-        original_text = self.model.data.get("original_text", "")
-        echo_results = self.model.data.get("echo_results", [])
-
-        # Prepare a list of (start, end, color) for all echo occurrences based on REGEX MATCHES
-        echo_spans = []
-        saturation = 75
-        lightness = 15 # Darker for text on dark background
+        echo_list_html = self._generate_echo_list_html_content()
+        saturation, lightness = 75, 15
         
-        def get_hsl_color(hue, sat=saturation, lit=lightness):
-            return f"hsl({hue}, {sat}%, {lit}%)"
-
-        def get_echo_occurrence_hsl_color(occurrence_index: int, total_occurrences: int, phrase_word_count: int):
-            """
-            Calculates a dynamic HSL color for an individual echo occurrence.
-            Color shifts from purple (low repetition/first instance) to red (high repetition/later instance).
-            The rate of shift is influenced by the phrase's word count.
-
-            :param occurrence_index: 0-indexed position of this specific occurrence (0 for 1st, 1 for 2nd, etc.)
-            :param total_occurrences: Total count of this phrase in the document.
-            :param phrase_word_count: Number of words in the phrase.
-            :return: An HSL color string.
-            """
-            if total_occurrences < 2:
-                return get_hsl_color(300) # Default to purple if somehow only 1 occurrence
-
-            # Normalize occurrence progress: 0.0 for first instance, 1.0 for last instance
-            occurrence_progress = occurrence_index / (total_occurrences - 1) if total_occurrences > 1 else 0.0
-
-            # --- ABSOLUTE COLOR CURVE LOGIC ---
-            # Define fixed word count points for the color curve
-            MIN_WORD_SEVERITY_THRESHOLD = 2
-            MAX_WORD_SEVERITY_THRESHOLD = 4
-            INSTANT_RED_WORD_THRESHOLD = 16
-
-            max_severity_at_last_occurrence = 0.0 # Initialize
-
-            if phrase_word_count >= INSTANT_RED_WORD_THRESHOLD:
-                # Phrases with 16 words or more are instantly red on any occurrence.
-                final_severity = 1.0
-            else:
-                if phrase_word_count <= MIN_WORD_SEVERITY_THRESHOLD:
-                    # 2-word phrases reach a maximum severity of 0.2 (blue hue) by their last occurrence.
-                    max_severity_at_last_occurrence = 0.2
-                elif phrase_word_count >= MAX_WORD_SEVERITY_THRESHOLD:
-                    # 4-word phrases reach a maximum severity of 1.0 (red hue) by their last occurrence.
-                    max_severity_at_last_occurrence = 1.0
-                else:
-                    # Linear interpolation for phrases between 2 and 4 words.
-                    # This scales the 'heating rate' between 0.2 and 1.0.
-                    normalized_word_count_in_range = (phrase_word_count - MIN_WORD_SEVERITY_THRESHOLD) / (MAX_WORD_SEVERITY_THRESHOLD - MIN_WORD_SEVERITY_THRESHOLD)
-                    max_severity_at_last_occurrence = 0.2 + (1.0 - 0.2) * normalized_word_count_in_range
-
-                # The actual severity for this occurrence is the progress * the max severity for this phrase length.
-                final_severity = occurrence_progress * max_severity_at_last_occurrence
-
-            final_severity = max(0.0, min(1.0, final_severity)) # Clamp final severity between 0 and 1
-
-            # Map severity (0.0 to 1.0) to hue (300 = Purple, 0 = Red)
-            # Hue decreases as severity increases.
-            hue = 300 - (final_severity * 300)
-            
-            return get_hsl_color(hue)
-
-        for echo_item in echo_results:
-            normalized_phrase = echo_item['phrase']
-            total_occurrences = len(echo_item['occurrences'])
-            phrase_word_count = echo_item['words']
-            
-            # Reconstruct the regex to find the actual spans in the original text
-            # This ensures punctuation is correctly handled by the regex, not explicitly removed
-            words_for_regex = re.split(r'\s+', normalized_phrase)
-            pattern = r'\b' + r'\W*'.join(re.escape(word) for word in words_for_regex) + r'\b'
-            
-            found_matches = []
-            for match in re.finditer(pattern, original_text, re.IGNORECASE):
-                found_matches.append((match.start(), match.end()))
-            
-            # Sort matches by start position to ensure correct occurrence_index
-            found_matches.sort(key=lambda x: x[0])
-
-            for occurrence_index, (start, end) in enumerate(found_matches):
-                color = get_echo_occurrence_hsl_color(
-                    occurrence_index=occurrence_index,
-                    total_occurrences=total_occurrences,
-                    phrase_word_count=phrase_word_count
-                )
-                echo_spans.append((start, end, color))
-
-        # Sort spans by start position
-        echo_spans.sort(key=lambda x: x[0])
-
-        # Generate HTML content by processing the original text and inserting highlights
-        html_parts = []
-        current_idx = 0
-
-        for echo_start, echo_end, echo_color in echo_spans:
-            # Add text before this echo, converting newlines
-            if echo_start > current_idx:
-                segment = original_text[current_idx:echo_start]
-                html_parts.append(self._convert_newlines_to_html(segment))
-            
-            # Add the highlighted echo itself
-            highlighted_text = original_text[echo_start:echo_end]
-            html_parts.append(
-                f'<span class="echo-highlight" style="background-color: {echo_color};">'
-                f'{highlighted_text}'
-                f'</span>'
-            )
-            current_idx = echo_end
+        html_content = self._get_combined_html_template(saturation, lightness, echo_list_html, '<p style="text-align: center; color: gray;">This view requires a semantic analysis export.</p>')
         
-        # Add any remaining text after the last echo, converting newlines
-        if current_idx < len(original_text):
-            segment = original_text[current_idx:]
-            html_parts.append(self._convert_newlines_to_html(segment))
-        
-        html_text_with_echo_highlights = ''.join(html_parts)
+        try:
+            with open(filepath, "w", encoding="utf-8") as f: f.write(html_content)
+            self.status_bar.showMessage(f"Echo List exported to {filepath}", 4000)
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to save HTML file: {e}")
 
-        # Final HTML structure based on PoC template for Echo List
-        # semantic_echo_html_content will be empty for now
-        html_content = f"""<!DOCTYPE html>
+    def on_export_semantic_echo_html(self):
+        if not SEMANTIC_ENABLED:
+            QMessageBox.critical(self, "Dependencies Missing", "Semantic analysis libraries (SpaCy, Transformers, etc.) are not available.")
+            return
+        if not self.model.data.get("echo_results"):
+            QMessageBox.information(self, "Export HTML", "No echo results to export.")
+            return
+        
+        filepath, _ = QFileDialog.getSaveFileName(self, "Export Semantic Echo (HTML)", "", "HTML Files (*.html)")
+        if not filepath: return
+        self.export_filepath = filepath
+        
+        worker = SemanticExportWorker(self.model.data.get("original_text", ""))
+        worker.signals.progress.connect(lambda msg: self.status_bar.showMessage(msg, 0))
+        worker.signals.error.connect(lambda err: QMessageBox.critical(self, "Semantic Error", err))
+        worker.signals.finished.connect(lambda: self.status_bar.showMessage("Semantic analysis complete.", 4000))
+        worker.signals.result.connect(self._on_semantic_export_result)
+        
+        self.model.threadpool.start(worker)
+
+    @Slot(str)
+    def _on_semantic_export_result(self, semantic_html_content):
+        echo_list_html = self._generate_echo_list_html_content()
+        saturation, lightness = 75, 15
+        
+        html_content = self._get_combined_html_template(saturation, lightness, echo_list_html, semantic_html_content)
+        
+        try:
+            with open(self.export_filepath, "w", encoding="utf-8") as f: f.write(html_content)
+            self.status_bar.showMessage(f"Semantic Echo report exported to {self.export_filepath}", 4000)
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to save HTML file: {e}")
+        finally:
+            self.export_filepath = None
+
+    def _get_combined_html_template(self, saturation, lightness, echo_list_html, semantic_echo_html):
+        return f"""<!DOCTYPE html>
 <html>
 <head>
 <title>Repetition Heatmap</title>
 <style>
 body {{ font-family: sans-serif; background-color: #333; color: white; }}
-#toggles {{ position: fixed; top: 10px; left: 25%; transform: translateX(-50%); text-align: center; }}
+#toggles {{ position: fixed; top: 10px; left: 25%; transform: translateX(-50%); text-align: center; z-index: 10; }}
 #toggles button {{ margin-right: 10px; padding: 5px 10px; cursor: pointer; }}
-#semantic-echo-view {{ display: none; }} /* Initially hide semantic view */
-.no-colors #semantic-echo-view p, .no-colors #echo-list-view span.echo-highlight {{ background-color: transparent !important; }} /* Hide colors */
-.echo-highlight {{ padding: 0.1em 0.2em; border-radius: 0.2em; }} /* Consistent styling */
+.no-colors #semantic-echo-view span, .no-colors #echo-list-view span.echo-highlight {{ background-color: transparent !important; }}
+.echo-highlight {{ padding: 0.1em 0.2em; border-radius: 0.2em; }}
 </style>
 </head>
 <body class="show-colors">
@@ -628,14 +688,13 @@ body {{ font-family: sans-serif; background-color: #333; color: white; }}
 </div>
 
 <h2 id="semantic-echo-header" style="display: none;">Echo List and Semantic Echo Level Repetition</h2>
-<div id="semantic-echo-view">
-    <!-- Semantic Echo content will be generated here when feature is enabled -->
-    <p style="text-align: center; color: gray;">Semantic Echo analysis is not yet implemented.</p>
+<div id="semantic-echo-view" style="display: none;">
+    {semantic_echo_html}
 </div>
 
 <h2 id="echo-list-header">Echo List Level Repetition</h2>
 <div id="echo-list-view" style="display: block;">
-    {html_text_with_echo_highlights}
+    {echo_list_html}
 </div>
 
 <script>
@@ -648,31 +707,18 @@ body {{ font-family: sans-serif; background-color: #333; color: white; }}
     let isEchoListView = true;
     let areColorsVisible = true;
 
-    // Initial state setup
-    semanticEchoView.style.display = 'none';
-    semanticEchoHeader.style.display = 'none';
-    echoListView.style.display = 'block';
-    echoListHeader.style.display = 'block';
-    toggleViewButton.textContent = 'Semantic Echo View';
-
-
     toggleViewButton.addEventListener('click', function() {{
         isEchoListView = !isEchoListView;
         if (isEchoListView) {{
-            semanticEchoView.style.display = 'none';
-            semanticEchoHeader.style.display = 'none';
-            echoListView.style.display = 'block';
-            echoListHeader.style.display = 'block';
+            semanticEchoView.style.display = 'none'; semanticEchoHeader.style.display = 'none';
+            echoListView.style.display = 'block'; echoListHeader.style.display = 'block';
             toggleViewButton.textContent = 'Semantic Echo View';
         }} else {{
-            semanticEchoView.style.display = 'block';
-            semanticEchoHeader.style.display = 'block';
-            echoListView.style.display = 'none';
-            echoListHeader.style.display = 'none';
+            semanticEchoView.style.display = 'block'; semanticEchoHeader.style.display = 'block';
+            echoListView.style.display = 'none'; echoListHeader.style.display = 'none';
             toggleViewButton.textContent = 'Echo List View';
         }}
     }});
-
     toggleColorsButton.addEventListener('click', function() {{
         areColorsVisible = !areColorsVisible;
         if (areColorsVisible) {{
@@ -684,24 +730,15 @@ body {{ font-family: sans-serif; background-color: #333; color: white; }}
         }}
     }});
 </script>
-
 </body>
 </html>"""
-
-        try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(html_content)
-            self.status_bar.showMessage(f"Echo List exported to {filepath}", 4000)
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", f"Failed to save HTML file: {e}")
-            self.status_bar.showMessage(f"Error saving HTML: {e}", 5000)
 
 def apply_app_settings(settings):
     available_styles = QStyleFactory.keys()
     saved_style = settings.value("gui/style", "Fusion")
     if saved_style in available_styles: QApplication.setStyle(saved_style)
     
-    try: # QSettings can return strings for enums, robustly handle it
+    try:
         theme_id_str = settings.value("gui/theme", str(Qt.ColorScheme.Unknown.value))
         theme_id = int(theme_id_str)
         QApplication.styleHints().setColorScheme(Qt.ColorScheme(theme_id))
